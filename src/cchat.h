@@ -5,11 +5,9 @@
 #include <fcgi_stdio.h>
 
 #include "bstrlib.h"
+#include "retval.h"
 
-#define RETVAL_PARAMS 1
-#define RETVAL_METHOD 2
-
-int cchat_handle_req( FCGX_Request* req );
+int cchat_handle_req( FCGX_Request* req, sqlite3* db );
 
 #endif /* !CCHAT_H */
 

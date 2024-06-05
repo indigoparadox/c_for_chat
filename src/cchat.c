@@ -1,15 +1,26 @@
 
+#include "chatdb.h"
 #include "cchat.h"
 
-typedef int (*cchat_route_cb_t)( FCGX_Request* req );
+typedef int (*cchat_route_cb_t)( FCGX_Request* req, sqlite3* db );
 
 #define CCHAT_ROUTES_TABLE( f ) \
    f( "/send", cchat_route_send, "POST" ) \
    f( "/", cchat_route_root, "GET" ) \
    f( "", NULL, "" )
 
-int cchat_route_send( FCGX_Request* req ) {
+int cchat_route_send( FCGX_Request* req, sqlite3* db ) {
    int retval = 0;
+   bstring msg_text = NULL;
+
+   /* TODO: Actual message text. */
+   msg_text = bfromcstr( "test" );
+   if( NULL == msg_text ) {
+      retval = RETVAL_ALLOC;
+      goto cleanup;
+   }
+
+   retval = chatdb_send_message( db, msg_text );
 
    /* Redirect to route. */
    FCGX_FPrintF( req->out, "Status: 303 See Other\r\n" );
@@ -17,10 +28,26 @@ int cchat_route_send( FCGX_Request* req ) {
    FCGX_FPrintF( req->out, "Cache-Control: no-cache\r\n" );
    FCGX_FPrintF( req->out, "\r\n" );
 
+cleanup:
+
+   if( NULL != msg_text ) {
+      bdestroy( msg_text );
+   }
+
    return retval;
 }
 
-int cchat_route_root( FCGX_Request* req ) {
+int cchat_print_msg_cb(
+   int msg_id, int msg_type, int from, int to, bstring text
+) {
+   int retval = 0;
+
+   /* TODO: Sanitize HTML. */
+
+   return retval;
+}
+
+int cchat_route_root( FCGX_Request* req, sqlite3* db ) {
    int retval = 0;
 
    FCGX_FPrintF( req->out, "Content-type: text/html\r\n" );
@@ -59,7 +86,7 @@ cchat_route_cb_t gc_cchat_route_cbs[] = {
    CCHAT_ROUTES_TABLE( CCHAT_ROUTES_TABLE_CBS )
 };
 
-int cchat_handle_req( FCGX_Request* req ) {
+int cchat_handle_req( FCGX_Request* req, sqlite3* db ) {
    int retval = 0;
    size_t i = 0;
    bstring req_method = NULL;
@@ -92,7 +119,7 @@ int cchat_handle_req( FCGX_Request* req ) {
       0 == bstrcmp( &(gc_cchat_route_methods[i]), req_method )
    ) {
       /* A valid route was found! */
-      retval = gc_cchat_route_cbs[i]( req );
+      retval = gc_cchat_route_cbs[i]( req, db );
    } else {
       FCGX_FPrintF( req->out, "Status: 404 Bad Request\r\n\r\n" );
    }

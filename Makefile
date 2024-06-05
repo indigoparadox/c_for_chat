@@ -1,7 +1,7 @@
 
 # vim: ft=make noexpandtab
 
-FLOPPCGI_SOURCES := src/main.c src/bstrlib.c src/cchat.c
+FLOPPCGI_SOURCES := src/main.c src/bstrlib.c src/cchat.c src/chatdb.c
 
 CFLAGS := -DDEBUG -Wall -g
 
@@ -12,7 +12,7 @@ LDFLAGS := -g
 all: cchat
 
 cchat: $(addprefix obj/,$(subst .c,.o,$(FLOPPCGI_SOURCES)))
-	$(CC) -o $@ $^ $(LDFLAGS) -lfcgi
+	$(CC) -o $@ $^ $(LDFLAGS) -lfcgi -lsqlite3
 
 obj/%.o: %.c
 	mkdir -p $(dir $@)
