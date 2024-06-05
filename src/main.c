@@ -24,7 +24,8 @@ int main() {
 	while( 0 <= FCGX_Accept_r( &req ) ) {
 
       retval = cchat_handle_req( &req, db );
-      if( retval ) {
+      if( RETVAL_ALLOC == retval ) {
+         /* Can't fix that. */
          goto cleanup;
       }
    }
