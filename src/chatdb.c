@@ -5,7 +5,7 @@
 
 struct CHATDB_ARG {
    chatdb_iter_cb_t cb;
-   FCGX_Request* req;
+   bstring page_text;
 };
 
 int chatdb_init( bstring path, sqlite3** db_p ) {
@@ -40,7 +40,7 @@ int chatdb_init( bstring path, sqlite3** db_p ) {
       "create table if not exists chat_schema( version int );",
       NULL, 0, &err_msg );
    if( SQLITE_OK != retval ) {
-      dbglog_error( "could not create database system tables!\n" );
+      dbglog_error( "could not create database system table: %s\n", err_msg );
       retval = RETVAL_DB;
       sqlite3_free( err_msg );
       goto cleanup;
@@ -116,7 +116,7 @@ int chatdb_dbcb_messages( void* arg, int argc, char** argv, char **col ) {
    }
 
    retval = arg_struct->cb(
-      arg_struct->req,
+      arg_struct->page_text,
       atoi( argv[0] ), /* msg_id */
       atoi( argv[1] ), /* msg_type */
       atoi( argv[2] ), /* user_from_id */
@@ -134,7 +134,7 @@ cleanup:
 }
 
 int chatdb_iter_messages(
-   FCGX_Request* req, sqlite3* db,
+   bstring page_text, sqlite3* db,
    int msg_type, int dest_id, chatdb_iter_cb_t cb
 ) {
    int retval = 0;
@@ -142,7 +142,7 @@ int chatdb_iter_messages(
    struct CHATDB_ARG arg_struct;
 
    arg_struct.cb = cb;
-   arg_struct.req = req;
+   arg_struct.page_text = page_text;
 
    /* Create schema table if it doesn't exist. */
    retval = sqlite3_exec( db,
@@ -152,7 +152,7 @@ int chatdb_iter_messages(
    if( SQLITE_OK != retval ) {
       dbglog_error( "could not execute database message query!\n" );
       retval = RETVAL_DB;
-      FCGX_FPrintF( req->out, "<tr><td>%s</td><td></td></tr>", err_msg );
+      /* FCGX_FPrintF( req->out, "<tr><td>%s</td><td></td></tr>", err_msg ); */
       goto cleanup;
    }
 

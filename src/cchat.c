@@ -13,6 +13,76 @@ typedef int (*cchat_route_cb_t)(
    f( "/chat", cchat_route_chat, "GET" ) \
    f( "", NULL, "" )
 
+static int cchat_page(
+   FCGX_Request* req, struct bstrList* q, struct bstrList* p,
+   bstring page_title, bstring page_text
+) {
+   int retval = 0;
+   size_t i = 0;
+   bstring err_msg = NULL;
+   bstring err_msg_decoded = NULL;
+   bstring err_msg_escaped = NULL;
+
+   FCGX_FPrintF( req->out, "Content-type: text/html\r\n" );
+   FCGX_FPrintF( req->out, "Status: 200\r\n\r\n" );
+
+   FCGX_FPrintF(
+      req->out, "<html><head><title>%s</title></head>\n", bdata( page_title ) );
+   FCGX_FPrintF( req->out, "<body>\n" );
+
+   /* Show error message if any. */
+   if( NULL != q ) {
+      for( i = 0 ; q->qty > i ; i++ ) {
+         retval = bcgi_query_key( q, "error", &err_msg );
+         if( retval ) {
+            dbglog_error( "error processing query string!\n" );
+            goto cleanup;
+         }
+      }
+
+      if( NULL != err_msg ) {
+         /* Decode HTML from query string. */
+         retval = bcgi_urldecode( err_msg, &err_msg_decoded );
+         if( retval ) {
+            goto cleanup;
+         }
+
+         /* Sanitize HTML. */
+         retval = bcgi_html_escape( err_msg_decoded, &err_msg_escaped );
+         if( retval ) {
+            goto cleanup;
+         }
+
+         FCGX_FPrintF(
+            req->out, "<div class=\"cchat-msg\">%s</div>\n",
+            bdata( err_msg_escaped ) );
+      }
+   }
+
+   FCGX_FPrintF( req->out, bdata( page_text ) );
+
+cleanup:
+
+   if( NULL == err_msg_decoded ) {
+      bdestroy( err_msg_decoded );
+   }
+
+   if( NULL == err_msg_escaped ) {
+      bdestroy( err_msg_escaped );
+   }
+
+   if( NULL == err_msg ) {
+      bdestroy( err_msg );
+   }
+
+   /* Close page. */
+   FCGX_FPrintF( req->out, "</body>\n" );
+   FCGX_FPrintF( req->out, "</html>\n" );
+
+   return retval;
+
+}
+
 int cchat_route_login(
    FCGX_Request* req, struct bstrList* q, struct bstrList* p, sqlite3* db
 ) {
@@ -67,7 +137,8 @@ int cchat_route_send(
    /* Redirect to route. */
    FCGX_FPrintF( req->out, "Status: 303 See Other\r\n" );
    if( NULL != err_msg ) {
-      FCGX_FPrintF( req->out, "Location: /chat?error=%s\r\n", bdata( err_msg ) );
+      FCGX_FPrintF(
+         req->out, "Location: /chat?error=%s\r\n", bdata( err_msg ) );
    } else {
       FCGX_FPrintF( req->out, "Location: /chat\r\n" );
    }
@@ -92,11 +163,12 @@ cleanup:
 }
 
 int cchat_print_msg_cb(
-   FCGX_Request* req,
+   bstring page_text,
    int msg_id, int msg_type, int from, int to, bstring text, time_t msg_time
 ) {
    int retval = 0;
    bstring text_escaped = NULL;
+   bstring msg_line = NULL;
 
    /* Sanitize HTML. */
    retval = bcgi_html_escape( text, &text_escaped );
@@ -104,10 +176,26 @@ int cchat_print_msg_cb(
       goto cleanup;
    }
 
-   FCGX_FPrintF( req->out, "<tr><td>%s</td><td>%d</td></tr>\n",
+   msg_line = bformat( "<tr><td>%s</td><td>%d</td></tr>\n",
       bdata( text_escaped ), msg_time );
+   if( NULL == msg_line ) {
+      dbglog_error( "could not allocate msg line!\n" );
+      retval = RETVAL_ALLOC;
+      goto cleanup;
+   }
+
+   retval = bconcat( page_text, msg_line );
+   if( NULL == msg_line ) {
+      dbglog_error( "could not add message to page!\n" );
+      retval = RETVAL_ALLOC;
+      goto cleanup;
+   }
 
 cleanup:
+
+   if( NULL != msg_line ) {
+      bdestroy( msg_line );
+   }
 
    if( NULL != text_escaped ) {
       bdestroy( text_escaped );
@@ -120,78 +208,49 @@ int cchat_route_chat(
    FCGX_Request* req, struct bstrList* q, struct bstrList* p, sqlite3* db
 ) {
    int retval = 0;
-   size_t i = 0;
-   bstring err_msg = NULL;
-   bstring err_msg_decoded = NULL;
-   bstring err_msg_escaped = NULL;
+   bstring page_text = NULL;
+   struct tagbstring page_title = bsStatic( "Chat" );
 
-   FCGX_FPrintF( req->out, "Content-type: text/html\r\n" );
-   FCGX_FPrintF( req->out, "Status: 200\r\n\r\n" );
-
-   FCGX_FPrintF( req->out, "<html><head><title>Chat</title></head>\n" );
-   FCGX_FPrintF( req->out, "<body>\n" );
-
-   /* Show error message if any. */
-   if( NULL != q ) {
-      for( i = 0 ; q->qty > i ; i++ ) {
-         retval = bcgi_query_key( q, "error", &err_msg );
-         if( retval ) {
-            dbglog_error( "error processing query string!\n" );
-            goto cleanup;
-         }
-      }
-
-      if( NULL != err_msg ) {
-         /* Decode HTML from query string. */
-         retval = bcgi_urldecode( err_msg, &err_msg_decoded );
-         if( retval ) {
-            goto cleanup;
-         }
-
-         /* Sanitize HTML. */
-         retval = bcgi_html_escape( err_msg_decoded, &err_msg_escaped );
-         if( retval ) {
-            goto cleanup;
-         }
-
-         FCGX_FPrintF(
-            req->out, "<div class=\"cchat-msg\">%s</div>\n",
-            bdata( err_msg_escaped ) );
-      }
-   }
+   page_text = bfromcstr( "" );
 
    /* Show messages. */
-   FCGX_FPrintF( req->out, "<table class=\"cchat-messages\">\n" );
-   retval = chatdb_iter_messages( req, db, 0, 0, cchat_print_msg_cb );
-   FCGX_FPrintF( req->out, "</table>\n" );
+   retval = bcatcstr( page_text, "<table class=\"cchat-messages\">\n" );
+   if( BSTR_ERR == retval ) {
+      dbglog_error( "error starting table!\n" );
+      retval = RETVAL_ALLOC;
+      goto cleanup;
+   }
+   retval = chatdb_iter_messages( page_text, db, 0, 0, cchat_print_msg_cb );
    if( retval ) {
+      goto cleanup;
+   }
+   retval = bcatcstr( page_text, "</table>\n" );
+   if( BSTR_ERR == retval ) {
+      dbglog_error( "error ending table!\n" );
+      retval = RETVAL_ALLOC;
       goto cleanup;
    }
 
    /* Show chat input form. */
-   FCGX_FPrintF( req->out, "<form action=\"/send\" method=\"post\">\n" );
-   FCGX_FPrintF( req->out, "<input type=\"text\" name=\"chat\" />\n" );
-   FCGX_FPrintF( req->out,
-      "<input type=\"submit\" name=\"submit\" value=\"Send\" />\n" );
-   FCGX_FPrintF( req->out, "</form>\n" );
+   retval = bcatcstr(
+      page_text,
+      "<form action=\"/send\" method=\"post\">\n"
+         "<input type=\"text\" name=\"chat\" />\n"
+         "<input type=\"submit\" name=\"submit\" value=\"Send\" />\n"
+      "</form>\n" );
+   if( BSTR_ERR == retval ) {
+      dbglog_error( "error adding form!\n" );
+      retval = RETVAL_ALLOC;
+      goto cleanup;
+   }
+
+   retval = cchat_page( req, q, p, &page_title, page_text );
 
 cleanup:
 
-   if( NULL == err_msg_decoded ) {
-      bdestroy( err_msg_decoded );
+   if( NULL != page_text ) {
+      bdestroy( page_text );
    }
-
-   if( NULL == err_msg_escaped ) {
-      bdestroy( err_msg_escaped );
-   }
-
-   if( NULL == err_msg ) {
-      bdestroy( err_msg );
-   }
-
-   /* Close page. */
-   FCGX_FPrintF( req->out, "</body>\n" );
-   FCGX_FPrintF( req->out, "</html>\n" );
 
    return retval;
 }
