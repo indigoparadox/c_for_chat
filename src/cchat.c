@@ -1,6 +1,7 @@
 
 #include "chatdb.h"
 #include "cchat.h"
+#include "bcgi.h"
 
 #include "dbglog.h"
 
@@ -14,73 +15,6 @@ typedef int (*cchat_route_cb_t)(
    f( "/", cchat_route_root, "GET" ) \
    f( "", NULL, "" )
 
-#define CCHAT_HTML_ESC_TABLE( f ) \
-   f( "<", "&lt;", CSTR_LT ) \
-   f( ">", "&gt;", CSTR_GT ) \
-   f( "", "", CSTR_MAX )
-
-#define CCHAT_HTML_ESC_TABLE_STR( str, esc, id ) bsStatic( str ),
-
-struct tagbstring gc_html_esc_before[] = {
-   CCHAT_HTML_ESC_TABLE( CCHAT_HTML_ESC_TABLE_STR )
-};
-
-#define CCHAT_HTML_ESC_TABLE_ESC( str, esc, id ) bsStatic( esc ),
-
-struct tagbstring gc_html_esc_after[] = {
-   CCHAT_HTML_ESC_TABLE( CCHAT_HTML_ESC_TABLE_ESC )
-};
-
-int cchat_query_key( struct bstrList* array, const char* key, bstring* val_p ) {
-   size_t i = 0;
-   int retval = 0;
-   struct bstrList* key_val_arr = NULL;
-
-   /* Start with the assumption of key not found. */
-   if( NULL != *val_p ) {
-      bdestroy( *val_p );
-      *val_p = NULL;
-   }
-
-   if( NULL == array ) {
-      /* No list, no value! */
-      goto cleanup;
-   }
-
-   for( i = 0 ; array->qty > i ; i++ ) {
-      key_val_arr = bsplit( array->entry[i], '=' );
-      if( NULL == key_val_arr ) {
-         /* Couldn't split this pair... */
-         continue;
-      }
-
-      if( 1 != biseqcstr( key_val_arr->entry[0], key ) ) {
-         /* This is the wrong key... */
-         bstrListDestroy( key_val_arr );
-         key_val_arr = NULL;
-         continue;
-      }
-
-      /* We've found our key! */
-      *val_p = bstrcpy( key_val_arr->entry[1] );
-      if( NULL == *val_p ) {
-         dbglog_error( "could not allocate value bstring!\n" );
-         retval = RETVAL_ALLOC;
-      }
-      bstrListDestroy( key_val_arr );
-      key_val_arr = NULL;
-      break;
-   }
-
-cleanup:
-
-   if( NULL != key_val_arr ) {
-      bstrListDestroy( key_val_arr );
-   }
-
-   return retval;
-}
-
 int cchat_route_send(
    FCGX_Request* req, struct bstrList* q, struct bstrList* p, sqlite3* db
 ) {
@@ -89,7 +23,7 @@ int cchat_route_send(
    bstring err_msg = NULL;
 
    if( NULL != p ) {
-      retval = cchat_query_key( p, "chat", &msg_text );
+      retval = bcgi_query_key( p, "chat", &msg_text );
       if( retval ) {
          goto cleanup;
       }

@@ -2,6 +2,8 @@
 #ifndef DBGLOG_H
 #define DBGLOG_H
 
+#include <stdio.h>
+
 #include "retval.h"
 
 int dbglog_init( char* dbglog_path );

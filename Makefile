@@ -1,7 +1,7 @@
 
 # vim: ft=make noexpandtab
 
-FLOPPCGI_SOURCES := src/main.c src/bstrlib.c src/cchat.c src/chatdb.c
+FLOPPCGI_SOURCES := src/main.c src/bstrlib.c src/cchat.c src/chatdb.c src/bcgi.c
 
 CFLAGS := -DDEBUG -Wall -g
 
