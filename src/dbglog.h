@@ -2,21 +2,20 @@
 #ifndef DBGLOG_H
 #define DBGLOG_H
 
-#include <stdio.h>
+/* int dbglog_init( char* dbglog_path );
 
-#include "retval.h"
-
-int dbglog_init( char* dbglog_path );
-
-void dbglog_shutdown();
+void dbglog_shutdown(); */
 
 #define _dbglog_fmt( lvl, file, line ) "(" #lvl ") " file ": " #line ": "
 
 #define dbglog_debug( lvl, ... ) \
-   fprintf( g_dbglog_file, _dbglog_fmt( lvl, __FILE__, __LINE__ ) __VA_ARGS__ ); \
+   assert( NULL != g_dbglog_file ); \
+   fprintf( \
+      g_dbglog_file, _dbglog_fmt( lvl, __FILE__, __LINE__ ) __VA_ARGS__ ); \
    fflush( g_dbglog_file );
 
 #define dbglog_error( ... ) \
+   assert( NULL != g_dbglog_file ); \
    fprintf( g_dbglog_file, _dbglog_fmt( E, __FILE__, __LINE__ ) __VA_ARGS__ ); \
    fflush( g_dbglog_file );
 
@@ -24,7 +23,7 @@ void dbglog_shutdown();
 
 FILE* g_dbglog_file = NULL;
 
-int dbglog_init( char* dbglog_path ) {
+static int dbglog_init( char* dbglog_path ) {
    int retval = 0;
 
    g_dbglog_file = fopen( dbglog_path, "w" );
@@ -35,7 +34,7 @@ int dbglog_init( char* dbglog_path ) {
    return retval;
 }
 
-void dbglog_shutdown() {
+static void dbglog_shutdown() {
    fclose( g_dbglog_file );
 }
 

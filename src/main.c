@@ -1,11 +1,9 @@
 
-#include <string.h> /* for memset() */
-
-#include "chatdb.h"
-#include "cchat.h"
 
 #define DBGLOG_C
-#include "dbglog.h"
+#include "main.h"
+
+#include <string.h> /* for memset() */
 
 int main() {
    FCGX_Request req;
@@ -18,6 +16,8 @@ int main() {
    if( retval ) {
       goto cleanup;
    }
+
+   assert( NULL != g_dbglog_file );
 
    dbglog_debug( 1, "initializing...\n" );
 

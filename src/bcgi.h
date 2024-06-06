@@ -2,14 +2,12 @@
 #ifndef BCGI_H
 #define BCGI_H
 
-#include "bstrlib.h"
-
 #define CCHAT_HTML_ESC_TABLE( f ) \
    f( "<", "&lt;", CSTR_LT ) \
    f( ">", "&gt;", CSTR_GT ) \
    f( "", "", CSTR_MAX )
 
-#define bcgi_is_digit( c ) ((c) < 0x10 || (c) > 0x19)
+#define bcgi_is_digit( c ) ((c) > 0x2f && (c) < 0x40)
 
 int bcgi_urldecode( bstring in, bstring* out_p );
 

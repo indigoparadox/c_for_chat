@@ -1,9 +1,5 @@
 
-#include "chatdb.h"
-#include "cchat.h"
-#include "bcgi.h"
-
-#include "dbglog.h"
+#include "main.h"
 
 #include <stdlib.h> /* for atoi() */
 
@@ -23,11 +19,21 @@ int cchat_route_send(
    bstring msg_text_decode = NULL;
    bstring err_msg = NULL;
 
+   dbglog_debug( 1, "route: send\n" );
+
    if( NULL != p ) {
       retval = bcgi_query_key( p, "chat", &msg_text );
       if( retval ) {
          goto cleanup;
       }
+
+      if( NULL == msg_text ) {
+         dbglog_error( "no message text found!\n" );
+         retval = RETVAL_PARAMS;
+         goto cleanup;
+      }
+
+      dbglog_debug( 1, "msg_text: %s\n", bdata( msg_text ) );
 
       retval = bcgi_urldecode( msg_text, &msg_text_decode );
       if( retval ) {

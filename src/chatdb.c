@@ -1,9 +1,5 @@
 
-#include "chatdb.h"
-
-#include "bstrlib.h"
-
-#include "dbglog.h"
+#include "main.h"
 
 #include <stdlib.h> /* for atoi() */
 

@@ -1,11 +1,34 @@
 
 #define BCGI_C
-#include "bcgi.h"
+#include "main.h"
 
-#include "dbglog.h"
+#include <stdlib.h> /* for atoi() */
 
 #define URLDECODE_STATE_NONE     0
 #define URLDECODE_STATE_INSIDE   1
+
+static int _bcgi_urldecode_entity( bstring out, bstring decode ) {
+   int retval = 0;
+
+   dbglog_debug( 1, "decoding entity: %s", bdata( decode ) );
+
+   retval = bconchar( out, (char)strtol( (char*)decode->data, NULL, 16 ) );
+   if( BSTR_ERR == retval ) {
+      retval = RETVAL_PARAMS;
+      goto cleanup;
+   }
+
+   /* Reset the decode buffer. */
+   retval = bassignStatic( decode, "" );
+   if( BSTR_ERR == retval ) {
+      retval = RETVAL_PARAMS;
+      goto cleanup;
+   }
+
+cleanup:
+
+   return retval;
+}
 
 int bcgi_urldecode( bstring in, bstring* out_p ) {
    int retval = 0,
@@ -14,6 +37,11 @@ int bcgi_urldecode( bstring in, bstring* out_p ) {
    bstring decode_buf = NULL;
 
    decode_buf = bfromcstr( "" );
+   if( NULL == decode_buf ) {
+      dbglog_error( "could not allocate urldecode decode buffer!\n" );
+      retval = RETVAL_ALLOC;
+      goto cleanup;
+   }
    
    if( NULL == *out_p ) {
       *out_p = bfromcstr( "" );
@@ -25,37 +53,17 @@ int bcgi_urldecode( bstring in, bstring* out_p ) {
    }
 
    while( i_in < blength( in ) ) {
+      dbglog_debug( 1, "state: %d, char: %c\n", state, bchar( in, i_in ) );
       switch( state ) {
       case URLDECODE_STATE_INSIDE:
-         if( ';' == bchar( in, i_in ) ) {
+         if( !bcgi_is_digit( bchar( in, i_in ) ) ) {
             /* TODO: Perform decode of decode_buf. */
-            dbglog_debug( 1, "decoding entity: %s", bdata( decode_buf ) );
-
-            /* Reset the decode buffer. */
-            retval = bassignStatic( decode_buf, "" );
-            if( BSTR_ERR == retval ) {
-               retval = RETVAL_PARAMS;
-               goto cleanup;
-            }
-
+            _bcgi_urldecode_entity( *out_p, decode_buf );
             state = URLDECODE_STATE_NONE;
 
-         } else if( !bcgi_is_digit( bchar( in, i_in ) ) ) {
-            /* Give up on decoding this! Just pass it literally. */
-
-            /* The & we discarded earlier. */
-            retval = bconchar( *out_p, '&' );
-            if( BSTR_ERR == retval ) {
-               retval = RETVAL_PARAMS;
-               goto cleanup;
-            }
-            /* The decode_buf so far. */
-            retval = bconcat( *out_p, decode_buf );
-            if( BSTR_ERR == retval ) {
-               retval = RETVAL_PARAMS;
-               goto cleanup;
-            }
-            state = URLDECODE_STATE_NONE;
+            /* Don't move on to the next char; process this one again with the
+             * new state!
+             */
 
          } else {
             /* Concat the number to the decode buf. */
@@ -65,14 +73,38 @@ int bcgi_urldecode( bstring in, bstring* out_p ) {
                goto cleanup;
             }
 
+            /* Move on to the next char. */
+            i_in++;
          }
          break;
 
       case URLDECODE_STATE_NONE:
-         retval = bconchar( *out_p, bchar( in, i_in ) );
+         switch( bchar( in, i_in ) ) {
+         case '+':
+            /* Translate plus to space. */
+            retval = bconchar( *out_p, ' ' );
+            break;
+
+         case '%':
+            /* Entity found! */
+            state = URLDECODE_STATE_INSIDE;
+            break;
+
+         default:
+            /* Literal char. */
+            retval = bconchar( *out_p, bchar( in, i_in ) );
+            break;
+         }
+         
+         /* Move on to the next char. */
+         i_in++;
          break;
       }
-      i_in++;
+   }
+
+   if( URLDECODE_STATE_INSIDE == state ) {
+      /* The string must've ended with an entity. */
+      _bcgi_urldecode_entity( *out_p, decode_buf );
    }
 
    /* We finished without hitting a goto. */

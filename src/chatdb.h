@@ -2,12 +2,6 @@
 #ifndef CHATDB_H
 #define CHATDB_H
 
-#include <sqlite3.h>
-#include <fcgi_stdio.h>
-
-#include "bstrlib.h"
-#include "retval.h"
-
 /* TODO: Timestamp. */
 
 typedef int (*chatdb_iter_cb_t)(

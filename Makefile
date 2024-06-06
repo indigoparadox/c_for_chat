@@ -3,9 +3,9 @@
 
 FLOPPCGI_SOURCES := src/main.c src/bstrlib.c src/cchat.c src/chatdb.c src/bcgi.c
 
-CFLAGS := -DDEBUG -Wall -g
+CFLAGS := -DDEBUG -Wall -g -fsanitize=undefined -fsanitize=leak -fsanitize=address
 
-LDFLAGS := -g
+LDFLAGS := -g -fsanitize=undefined -fsanitize=leak -fsanitize=address
 
 .PHONY: clean
 
