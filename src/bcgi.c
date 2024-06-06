@@ -4,6 +4,89 @@
 
 #include "dbglog.h"
 
+#define URLDECODE_STATE_NONE     0
+#define URLDECODE_STATE_INSIDE   1
+
+int bcgi_urldecode( bstring in, bstring* out_p ) {
+   int retval = 0,
+      state = 0;
+   size_t i_in = 0;
+   bstring decode_buf = NULL;
+
+   decode_buf = bfromcstr( "" );
+   
+   if( NULL == *out_p ) {
+      *out_p = bfromcstr( "" );
+      if( NULL == *out_p ) {
+         dbglog_error( "could not allocate urldecode output buffer!\n" );
+         retval = RETVAL_ALLOC;
+         goto cleanup;
+      }
+   }
+
+   while( i_in < blength( in ) ) {
+      switch( state ) {
+      case URLDECODE_STATE_INSIDE:
+         if( ';' == bchar( in, i_in ) ) {
+            /* TODO: Perform decode of decode_buf. */
+            dbglog_debug( 1, "decoding entity: %s", bdata( decode_buf ) );
+
+            /* Reset the decode buffer. */
+            retval = bassignStatic( decode_buf, "" );
+            if( BSTR_ERR == retval ) {
+               retval = RETVAL_PARAMS;
+               goto cleanup;
+            }
+
+            state = URLDECODE_STATE_NONE;
+
+         } else if( !bcgi_is_digit( bchar( in, i_in ) ) ) {
+            /* Give up on decoding this! Just pass it literally. */
+
+            /* The & we discarded earlier. */
+            retval = bconchar( *out_p, '&' );
+            if( BSTR_ERR == retval ) {
+               retval = RETVAL_PARAMS;
+               goto cleanup;
+            }
+            /* The decode_buf so far. */
+            retval = bconcat( *out_p, decode_buf );
+            if( BSTR_ERR == retval ) {
+               retval = RETVAL_PARAMS;
+               goto cleanup;
+            }
+            state = URLDECODE_STATE_NONE;
+
+         } else {
+            /* Concat the number to the decode buf. */
+            retval = bconchar( decode_buf, bchar( in, i_in ) );
+            if( BSTR_ERR == retval ) {
+               retval = RETVAL_PARAMS;
+               goto cleanup;
+            }
+
+         }
+         break;
+
+      case URLDECODE_STATE_NONE:
+         retval = bconchar( *out_p, bchar( in, i_in ) );
+         break;
+      }
+      i_in++;
+   }
+
+   /* We finished without hitting a goto. */
+   retval = 0;
+
+cleanup:
+
+   if( NULL != decode_buf ) {
+      bdestroy( decode_buf );
+   }
+
+   return retval;
+}
+
 int bcgi_query_key( struct bstrList* array, const char* key, bstring* val_p ) {
    size_t i = 0;
    int retval = 0;

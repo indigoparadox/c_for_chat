@@ -20,6 +20,7 @@ int cchat_route_send(
 ) {
    int retval = 0;
    bstring msg_text = NULL;
+   bstring msg_text_decode = NULL;
    bstring err_msg = NULL;
 
    if( NULL != p ) {
@@ -28,7 +29,12 @@ int cchat_route_send(
          goto cleanup;
       }
 
-      retval = chatdb_send_message( db, msg_text, &err_msg );
+      retval = bcgi_urldecode( msg_text, &msg_text_decode );
+      if( retval ) {
+         goto cleanup;
+      }
+
+      retval = chatdb_send_message( db, msg_text_decode, &err_msg );
       if( retval ) {
          goto cleanup;
       }
@@ -45,6 +51,10 @@ int cchat_route_send(
    FCGX_FPrintF( req->out, "\r\n" );
 
 cleanup:
+
+   if( NULL != msg_text_decode ) {
+      bdestroy( msg_text_decode );
+   }
 
    if( NULL != msg_text ) {
       bdestroy( msg_text );

@@ -9,6 +9,10 @@
    f( ">", "&gt;", CSTR_GT ) \
    f( "", "", CSTR_MAX )
 
+#define bcgi_is_digit( c ) ((c) < 0x10 || (c) > 0x19)
+
+int bcgi_urldecode( bstring in, bstring* out_p );
+
 int bcgi_query_key( struct bstrList* array, const char* key, bstring* val_p );
 
 #ifdef BCGI_C
