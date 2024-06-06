@@ -7,9 +7,27 @@ typedef int (*cchat_route_cb_t)(
    FCGX_Request* req, struct bstrList* q, struct bstrList* p, sqlite3* db );
 
 #define CCHAT_ROUTES_TABLE( f ) \
+   f( "/login", cchat_route_login, "GET" ) \
+   f( "/auth", cchat_route_auth, "POST" ) \
    f( "/send", cchat_route_send, "POST" ) \
-   f( "/", cchat_route_root, "GET" ) \
+   f( "/chat", cchat_route_chat, "GET" ) \
    f( "", NULL, "" )
+
+int cchat_route_login(
+   FCGX_Request* req, struct bstrList* q, struct bstrList* p, sqlite3* db
+) {
+   int retval = 0;
+
+   return retval;
+}
+
+int cchat_route_auth(
+   FCGX_Request* req, struct bstrList* q, struct bstrList* p, sqlite3* db
+) {
+   int retval = 0;
+
+   return retval;
+}
 
 int cchat_route_send(
    FCGX_Request* req, struct bstrList* q, struct bstrList* p, sqlite3* db
@@ -49,9 +67,9 @@ int cchat_route_send(
    /* Redirect to route. */
    FCGX_FPrintF( req->out, "Status: 303 See Other\r\n" );
    if( NULL != err_msg ) {
-      FCGX_FPrintF( req->out, "Location: /?error=%s\r\n", bdata( err_msg ) );
+      FCGX_FPrintF( req->out, "Location: /chat?error=%s\r\n", bdata( err_msg ) );
    } else {
-      FCGX_FPrintF( req->out, "Location: /\r\n" );
+      FCGX_FPrintF( req->out, "Location: /chat\r\n" );
    }
    FCGX_FPrintF( req->out, "Cache-Control: no-cache\r\n" );
    FCGX_FPrintF( req->out, "\r\n" );
@@ -78,26 +96,34 @@ int cchat_print_msg_cb(
    int msg_id, int msg_type, int from, int to, bstring text, time_t msg_time
 ) {
    int retval = 0;
-   size_t i = 0;
+   bstring text_escaped = NULL;
 
    /* Sanitize HTML. */
-   while( 0 < blength( &(gc_html_esc_before[i]) ) ) {
-      bfindreplacecaseless(
-         text, &(gc_html_esc_before[i]), &(gc_html_esc_after[i]), 0 );
-      i++;
+   retval = bcgi_html_escape( text, &text_escaped );
+   if( retval ) {
+      goto cleanup;
    }
 
    FCGX_FPrintF( req->out, "<tr><td>%s</td><td>%d</td></tr>\n",
-      bdata( text ), msg_time );
+      bdata( text_escaped ), msg_time );
+
+cleanup:
+
+   if( NULL != text_escaped ) {
+      bdestroy( text_escaped );
+   }
 
    return retval;
 }
 
-int cchat_route_root(
+int cchat_route_chat(
    FCGX_Request* req, struct bstrList* q, struct bstrList* p, sqlite3* db
 ) {
    int retval = 0;
    size_t i = 0;
+   bstring err_msg = NULL;
+   bstring err_msg_decoded = NULL;
+   bstring err_msg_escaped = NULL;
 
    FCGX_FPrintF( req->out, "Content-type: text/html\r\n" );
    FCGX_FPrintF( req->out, "Status: 200\r\n\r\n" );
@@ -108,8 +134,29 @@ int cchat_route_root(
    /* Show error message if any. */
    if( NULL != q ) {
       for( i = 0 ; q->qty > i ; i++ ) {
+         retval = bcgi_query_key( q, "error", &err_msg );
+         if( retval ) {
+            dbglog_error( "error processing query string!\n" );
+            goto cleanup;
+         }
+      }
+
+      if( NULL != err_msg ) {
+         /* Decode HTML from query string. */
+         retval = bcgi_urldecode( err_msg, &err_msg_decoded );
+         if( retval ) {
+            goto cleanup;
+         }
+
+         /* Sanitize HTML. */
+         retval = bcgi_html_escape( err_msg_decoded, &err_msg_escaped );
+         if( retval ) {
+            goto cleanup;
+         }
+
          FCGX_FPrintF(
-            req->out, "<div class=\"cchat-msg\">%s</div>\n", bdata( q->entry[i] ) );
+            req->out, "<div class=\"cchat-msg\">%s</div>\n",
+            bdata( err_msg_escaped ) );
       }
    }
 
@@ -129,6 +176,18 @@ int cchat_route_root(
    FCGX_FPrintF( req->out, "</form>\n" );
 
 cleanup:
+
+   if( NULL == err_msg_decoded ) {
+      bdestroy( err_msg_decoded );
+   }
+
+   if( NULL == err_msg_escaped ) {
+      bdestroy( err_msg_escaped );
+   }
+
+   if( NULL == err_msg ) {
+      bdestroy( err_msg );
+   }
 
    /* Close page. */
    FCGX_FPrintF( req->out, "</body>\n" );
@@ -163,7 +222,6 @@ int cchat_handle_req( FCGX_Request* req, sqlite3* db ) {
    bstring req_method = NULL;
    bstring req_uri_raw = NULL;
    bstring req_query = NULL;
-   bstring err_msg = NULL;
    bstring post_buf = NULL;
    size_t post_buf_sz = 0;
    struct bstrList* req_query_list = NULL;

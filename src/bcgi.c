@@ -56,7 +56,11 @@ int bcgi_urldecode( bstring in, bstring* out_p ) {
       dbglog_debug( 1, "state: %d, char: %c\n", state, bchar( in, i_in ) );
       switch( state ) {
       case URLDECODE_STATE_INSIDE:
-         if( !bcgi_is_digit( bchar( in, i_in ) ) ) {
+         if(
+            !bcgi_is_hex_digit( bchar( in, i_in ) ) ||
+            /* TODO: Always limit decode buf to two chars? */
+            2 <= blength( decode_buf )
+         ) {
             /* TODO: Perform decode of decode_buf. */
             _bcgi_urldecode_entity( *out_p, decode_buf );
             state = URLDECODE_STATE_NONE;
@@ -114,6 +118,41 @@ cleanup:
 
    if( NULL != decode_buf ) {
       bdestroy( decode_buf );
+   }
+
+   return retval;
+}
+
+int bcgi_html_escape( bstring in, bstring* out_p ) {
+   int retval = 0;
+   size_t i = 0;
+
+   *out_p = bstrcpy( in );
+   if( NULL == *out_p ) {
+      dbglog_error( "could not allocate replacement string!\n" );
+      retval = RETVAL_ALLOC;
+      goto cleanup;
+   }
+
+   while( 0 < blength( &(gc_html_esc_before[i]) ) ) {
+      retval = bfindreplacecaseless(
+         *out_p, &(gc_html_esc_before[i]), &(gc_html_esc_after[i]), 0 );
+      if( BSTR_ERR == retval ) {
+         retval = RETVAL_ALLOC;
+         dbglog_error( "error escaping HTML!\n" );
+         goto cleanup;
+      } else {
+         retval = 0;
+      }
+      i++;
+   }
+
+cleanup:
+
+   if( retval && NULL != *out_p ) {
+      /* If there was a problem then don't risk a non-decoded message! */
+      bdestroy( *out_p );
+      *out_p = NULL;
    }
 
    return retval;
