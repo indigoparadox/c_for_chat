@@ -3,6 +3,8 @@
 
 #include "bstrlib.h"
 
+#include "dbglog.h"
+
 #include <stdlib.h> /* for atoi() */
 
 struct CHATDB_ARG {
@@ -16,6 +18,7 @@ int chatdb_init( bstring path, sqlite3** db_p ) {
 
    retval = sqlite3_open( bdata( path ), db_p );
    if( SQLITE_OK != retval ) {
+      dbglog_error( "could not open database!\n" );
       retval = RETVAL_DB;
       goto cleanup;
    }
@@ -30,6 +33,7 @@ int chatdb_init( bstring path, sqlite3** db_p ) {
          "msg_text text,"
          "msg_time datetime default current_timestamp );", NULL, 0, &err_msg );
    if( SQLITE_OK != retval ) {
+      dbglog_error( "could not create database message tables!\n" );
       retval = RETVAL_DB;
       sqlite3_free( err_msg );
       goto cleanup;
@@ -40,6 +44,7 @@ int chatdb_init( bstring path, sqlite3** db_p ) {
       "create table if not exists chat_schema( version int );",
       NULL, 0, &err_msg );
    if( SQLITE_OK != retval ) {
+      dbglog_error( "could not create database system tables!\n" );
       retval = RETVAL_DB;
       sqlite3_free( err_msg );
       goto cleanup;
@@ -72,6 +77,7 @@ int chatdb_send_message( sqlite3* db, bstring msg, bstring* err_msg_p ) {
       "values(0, 0, 0, '%q')",
       bdata( msg ) );
    if( NULL == query ) {
+      dbglog_error( "could not allocate database chat insert!\n" );
       retval = RETVAL_ALLOC;
       goto cleanup;
    }
@@ -148,6 +154,7 @@ int chatdb_iter_messages(
          "msg_text, strftime('%s', msg_time) from messages",
       chatdb_dbcb_messages, &arg_struct, &err_msg );
    if( SQLITE_OK != retval ) {
+      dbglog_error( "could not execute database message query!\n" );
       retval = RETVAL_DB;
       FCGX_FPrintF( req->out, "<tr><td>%s</td><td></td></tr>", err_msg );
       goto cleanup;

@@ -2,6 +2,8 @@
 #include "chatdb.h"
 #include "cchat.h"
 
+#include "dbglog.h"
+
 #include <stdlib.h> /* for atoi() */
 
 typedef int (*cchat_route_cb_t)(
@@ -12,21 +14,21 @@ typedef int (*cchat_route_cb_t)(
    f( "/", cchat_route_root, "GET" ) \
    f( "", NULL, "" )
 
-#define CCHAT_CONST_STRS_TABLE( f ) \
+#define CCHAT_HTML_ESC_TABLE( f ) \
    f( "<", "&lt;", CSTR_LT ) \
    f( ">", "&gt;", CSTR_GT ) \
    f( "", "", CSTR_MAX )
 
-#define CCHAT_CONST_STRS_TABLE_STR( str, esc, id ) bsStatic( str ),
+#define CCHAT_HTML_ESC_TABLE_STR( str, esc, id ) bsStatic( str ),
 
-struct tagbstring gc_const_strs[] = {
-   CCHAT_CONST_STRS_TABLE( CCHAT_CONST_STRS_TABLE_STR )
+struct tagbstring gc_html_esc_before[] = {
+   CCHAT_HTML_ESC_TABLE( CCHAT_HTML_ESC_TABLE_STR )
 };
 
-#define CCHAT_CONST_STRS_TABLE_ESC( str, esc, id ) bsStatic( esc ),
+#define CCHAT_HTML_ESC_TABLE_ESC( str, esc, id ) bsStatic( esc ),
 
-struct tagbstring gc_const_str_escs[] = {
-   CCHAT_CONST_STRS_TABLE( CCHAT_CONST_STRS_TABLE_ESC )
+struct tagbstring gc_html_esc_after[] = {
+   CCHAT_HTML_ESC_TABLE( CCHAT_HTML_ESC_TABLE_ESC )
 };
 
 int cchat_query_key( struct bstrList* array, const char* key, bstring* val_p ) {
@@ -62,6 +64,7 @@ int cchat_query_key( struct bstrList* array, const char* key, bstring* val_p ) {
       /* We've found our key! */
       *val_p = bstrcpy( key_val_arr->entry[1] );
       if( NULL == *val_p ) {
+         dbglog_error( "could not allocate value bstring!\n" );
          retval = RETVAL_ALLOC;
       }
       bstrListDestroy( key_val_arr );
@@ -128,9 +131,9 @@ int cchat_print_msg_cb(
    size_t i = 0;
 
    /* Sanitize HTML. */
-   while( 0 < blength( &(gc_const_strs[i]) ) ) {
+   while( 0 < blength( &(gc_html_esc_before[i]) ) ) {
       bfindreplacecaseless(
-         text, &(gc_const_strs[i]), &(gc_const_str_escs[i]), 0 );
+         text, &(gc_html_esc_before[i]), &(gc_html_esc_after[i]), 0 );
       i++;
    }
 
@@ -219,6 +222,7 @@ int cchat_handle_req( FCGX_Request* req, sqlite3* db ) {
    /* Figure out our request method and consequent action. */
    req_method = bfromcstr( FCGX_GetParam( "REQUEST_METHOD", req->envp ) );
    if( NULL == req_method ) {
+      dbglog_error( "invalid request params!\n" );
       retval = RETVAL_PARAMS;
       goto cleanup;
    }
@@ -226,6 +230,7 @@ int cchat_handle_req( FCGX_Request* req, sqlite3* db ) {
    /* TODO: URLdecode paths. */
    req_uri_raw = bfromcstr( FCGX_GetParam( "DOCUMENT_URI", req->envp ) );
    if( NULL == req_uri_raw ) {
+      dbglog_error( "invalid request URI!\n" );
       retval = RETVAL_PARAMS;
       goto cleanup;
    }
@@ -233,6 +238,7 @@ int cchat_handle_req( FCGX_Request* req, sqlite3* db ) {
    /* Get query string and split into list. */
    req_query = bfromcstr( FCGX_GetParam( "QUERY_STRING", req->envp ) );
    if( NULL == req_query ) {
+      dbglog_error( "invalid request query string!\n" );
       retval = RETVAL_PARAMS;
       goto cleanup;
    }
@@ -241,20 +247,30 @@ int cchat_handle_req( FCGX_Request* req, sqlite3* db ) {
 
    /* Get POST data (if any). */
    if( 1 == biseqcaselessStatic( req_method, "POST" ) ) {
+      /* Allocate buffer to hold POST data. */
       post_buf_sz = atoi( FCGX_GetParam( "CONTENT_LENGTH", req->envp ) );
       post_buf = bfromcstralloc( post_buf_sz + 1, "" );
       if( NULL == post_buf || NULL == bdata( post_buf ) ) {
+         dbglog_error( "could not allocate POST buffer!\n" );
          retval = RETVAL_ALLOC;
          goto cleanup;
       }
       FCGX_GetStr( bdata( post_buf ), post_buf_sz, req->in );
-      post_buf->slen = strlen( (char*)post_buf->data );
+      post_buf->slen = post_buf_sz;
+      post_buf->data[post_buf_sz] = '\0';
+
+      /* Validate post_buf size. */
       if( post_buf->slen >= post_buf->mlen ) {
+         dbglog_error( "invalid POST buffer size! (s: %d, m: %d)\n",
+            post_buf->slen, post_buf->mlen );
          retval = RETVAL_ALLOC;
          goto cleanup;
       }
+ 
+      /* Split post_buf into a key/value array. */
       post_buf_list = bsplit( post_buf, '&' );
       if( NULL == post_buf_list ) {
+         dbglog_error( "could not split POST buffer!\n" );
          retval = RETVAL_ALLOC;
          goto cleanup;
       }

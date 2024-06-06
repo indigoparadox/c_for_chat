@@ -4,12 +4,22 @@
 #include "chatdb.h"
 #include "cchat.h"
 
+#define DBGLOG_C
+#include "dbglog.h"
+
 int main() {
    FCGX_Request req;
    int cgi_sock = -1;
    int retval = 0;
    sqlite3* db = NULL;
    struct tagbstring chatdb_path = bsStatic( "chat.db" );
+
+   retval = dbglog_init( "cchat.log" );
+   if( retval ) {
+      goto cleanup;
+   }
+
+   dbglog_debug( 1, "initializing...\n" );
 
    retval = chatdb_init( &chatdb_path, &db );
    if( retval ) {
@@ -39,6 +49,8 @@ cleanup:
    if( NULL != db ) {
       chatdb_close( &db );
    }
+
+   dbglog_shutdown();
 
    return retval;
 }
