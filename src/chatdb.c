@@ -8,6 +8,7 @@
 
 #define CHATDB_HASH_SZ 32
 #define CHATDB_SALT_SZ 32
+#define CHATDB_PASSWORD_ITER 2000
 
 struct CHATDB_ARG {
    chatdb_iter_msg_cb_t cb_msg;
@@ -85,32 +86,40 @@ void chatdb_close( sqlite3** db_p ) {
 
 }
 
-int chatdb_add_user(
-   sqlite3* db, bstring user, bstring password, bstring* err_msg_p
+int chatdb_hash_password(
+   bstring password, size_t password_iter,
+   bstring salt, bstring* hash_out_p
 ) {
-   int retval = 0;
-   char* query = NULL;
-   char* err_msg = NULL;
+   unsigned char hash[CHATDB_HASH_SZ] = { 0 };
    unsigned char* hash_str = NULL;
    size_t hash_str_sz = 0;
-   unsigned char* salt_str = NULL;
+   unsigned char* salt_bin = NULL;
+   size_t salt_bin_sz = 0;
+   size_t decoded_sz = 0;
    size_t encoded_sz = 0;
-   size_t salt_str_sz = 0;
-   int password_iter = 2000;
-   unsigned char salt[CHATDB_SALT_SZ] = { 0 };
-   unsigned char hash[CHATDB_HASH_SZ] = { 0 };
+   int retval = 0;
 
-   /* Generae a new salt. */
-   if( 1 != RAND_bytes( salt, CHATDB_SALT_SZ ) ) {
-      dbglog_error( "error generating random bytes!\n" );
-      retval = RETVAL_DB;
+   /* Base64-decode the salt. */
+   salt_bin_sz = 3 * blength( salt ) / 4;
+   salt_bin = calloc( salt_bin_sz, 1 );
+   if( NULL == salt_bin ) {
+      dbglog_error( "could not allocate salt decoded str!\n" );
+      retval = RETVAL_ALLOC;
       goto cleanup;
+   }
+
+   /* TODO: Buffer size limit? */
+   decoded_sz = EVP_DecodeBlock(
+      salt_bin, (unsigned char*)bdata( salt ), blength( salt ) );
+   if( decoded_sz != salt_bin_sz ) {
+      dbglog_error( "predicted salt sz: %lu but was: %lu\n",
+         salt_bin_sz, decoded_sz );
    }
 
    /* Generate the hash. */
    if( !PKCS5_PBKDF2_HMAC(
       bdata( password ), blength( password ),
-      salt, CHATDB_SALT_SZ, password_iter, EVP_sha256(),
+      salt_bin, salt_bin_sz, password_iter, EVP_sha256(),
       CHATDB_HASH_SZ, hash )
    ) {
       dbglog_error( "error generating password hash!\n" );
@@ -134,20 +143,67 @@ int chatdb_add_user(
          hash_str_sz, encoded_sz );
    }
 
+   *hash_out_p = bfromcstr( (char*)hash_str );
+   if( NULL == *hash_out_p ) {
+      dbglog_error( "could not allocate hash encoded bstring!\n" );
+      retval = RETVAL_ALLOC;
+      goto cleanup;
+   }
+
+cleanup:
+
+   if( NULL != hash_str ) {
+      free( hash_str );
+   }
+
+   return retval;
+}
+
+int chatdb_add_user(
+   sqlite3* db, bstring user, bstring password, bstring* err_msg_p
+) {
+   int retval = 0;
+   char* query = NULL;
+   char* err_msg = NULL;
+   unsigned char* salt_str = NULL;
+   size_t encoded_sz = 0;
+   size_t salt_str_sz = 0;
+   unsigned char salt[CHATDB_SALT_SZ] = { 0 };
+   bstring hash = NULL;
+   bstring salt = NULL;
+
+   /* Generate a new salt. */
+   if( 1 != RAND_bytes( salt, CHATDB_SALT_SZ ) ) {
+      dbglog_error( "error generating random bytes!\n" );
+      retval = RETVAL_DB;
+      goto cleanup;
+   }
+
    /* Base64-encode the salt. */
    salt_str_sz = 4 * ((CHATDB_SALT_SZ + 2) / 3);
    salt_str = calloc( salt_str_sz + 1, 1 );
    if( NULL == salt_str ) {
-      dbglog_error( "could not allocate hash encoded str!\n" );
+      dbglog_error( "could not allocate salt encoded str!\n" );
       retval = RETVAL_ALLOC;
       goto cleanup;
    }
 
    /* TODO: Buffer size limit? */
    encoded_sz = EVP_EncodeBlock( salt_str, salt, CHATDB_SALT_SZ );
-   if( encoded_sz != hash_str_sz ) {
+   if( encoded_sz != salt_str_sz ) {
       dbglog_error( "predicted salt sz: %lu but was: %lu\n",
-         hash_str_sz, encoded_sz );
+         salt_str_sz, encoded_sz );
+   }
+   salt = bfromcstr( salt_str );
+   if( NULL == salt ) {
+      dbglog_error( "coult not allocate salt encoded bstring!\n" );
+      retval = RETVAL_ALLOC;
+      goto cleanup;
+   }
+
+   retval = chatdb_hash_password( password, CHATDB_PASSWORD_ITER, salt, hash );
+   if( retval ) {
+      goto cleanup;
    }
 
    /* Store the user record. */
@@ -155,7 +211,7 @@ int chatdb_add_user(
       "insert into users "
       "(user_name, hash, salt, iters) "
       "values('%q', '%q', '%q', '%d')",
-      bdata( user ), hash_str, salt_str, password_iter );
+      bdata( user ), bdata( hash ), salt_str, CHATDB_PASSWORD_ITER );
    if( NULL == query ) {
       dbglog_error( "could not allocate database user insert!\n" );
       retval = RETVAL_ALLOC;
@@ -171,12 +227,12 @@ int chatdb_add_user(
 
 cleanup:
 
-   if( NULL != salt_str ) {
-      free( salt_str );
+   if( NULL != salt ) {
+      bdestroy( salt );
    }
 
-   if( NULL != hash_str ) {
-      free( hash_str );
+   if( NULL != salt_str ) {
+      free( salt_str );
    }
 
    if( NULL != query ) {
