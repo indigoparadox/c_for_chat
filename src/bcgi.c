@@ -70,7 +70,8 @@ int bcgi_urldecode( bstring in, bstring* out_p ) {
             /* Concat the number to the decode buf. */
             retval = bconchar( decode_buf, bchar( in, i_in ) );
             if( BSTR_ERR == retval ) {
-               retval = RETVAL_PARAMS;
+               retval = RETVAL_ALLOC;
+               dbglog_error( "error appending to decode buffer!\n" );
                goto cleanup;
             }
 
@@ -84,6 +85,11 @@ int bcgi_urldecode( bstring in, bstring* out_p ) {
          case '+':
             /* Translate plus to space. */
             retval = bconchar( *out_p, ' ' );
+            if( BSTR_ERR == retval ) {
+               retval = RETVAL_ALLOC;
+               dbglog_error( "error appending to output buffer!\n" );
+               goto cleanup;
+            }
             break;
 
          case '%':
@@ -94,6 +100,11 @@ int bcgi_urldecode( bstring in, bstring* out_p ) {
          default:
             /* Literal char. */
             retval = bconchar( *out_p, bchar( in, i_in ) );
+            if( BSTR_ERR == retval ) {
+               retval = RETVAL_ALLOC;
+               dbglog_error( "error appending to output buffer!\n" );
+               goto cleanup;
+            }
             break;
          }
          
