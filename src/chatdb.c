@@ -86,74 +86,105 @@ void chatdb_close( sqlite3** db_p ) {
 
 }
 
-int chatdb_hash_password(
-   bstring password, size_t password_iter,
-   bstring salt, bstring* hash_out_p
-) {
-   unsigned char hash[CHATDB_HASH_SZ] = { 0 };
-   unsigned char* hash_str = NULL;
-   size_t hash_str_sz = 0;
-   unsigned char* salt_bin = NULL;
-   size_t salt_bin_sz = 0;
-   size_t decoded_sz = 0;
-   size_t encoded_sz = 0;
+int chatdb_b64_decode( bstring in, unsigned char** out_p, size_t* out_sz_p ) {
    int retval = 0;
+   size_t decoded_sz = 0;
 
    /* Base64-decode the salt. */
-   salt_bin_sz = 3 * blength( salt ) / 4;
-   salt_bin = calloc( salt_bin_sz, 1 );
-   if( NULL == salt_bin ) {
-      dbglog_error( "could not allocate salt decoded str!\n" );
+   *out_sz_p = 3 * blength( in ) / 4;
+   *out_p = calloc( *out_sz_p, 1 );
+   if( NULL == *out_p ) {
+      dbglog_error( "could not allocate decoded str!\n" );
       retval = RETVAL_ALLOC;
       goto cleanup;
    }
 
    /* TODO: Buffer size limit? */
    decoded_sz = EVP_DecodeBlock(
-      salt_bin, (unsigned char*)bdata( salt ), blength( salt ) );
-   if( decoded_sz != salt_bin_sz ) {
-      dbglog_error( "predicted salt sz: %lu but was: %lu\n",
-         salt_bin_sz, decoded_sz );
+      *out_p, (unsigned char*)bdata( in ), blength( in ) );
+   if( decoded_sz != *out_sz_p ) {
+      dbglog_error( "predicted sz: %lu but was: %lu\n",
+         *out_sz_p, decoded_sz );
    }
 
-   /* Generate the hash. */
-   if( !PKCS5_PBKDF2_HMAC(
-      bdata( password ), blength( password ),
-      salt_bin, salt_bin_sz, password_iter, EVP_sha256(),
-      CHATDB_HASH_SZ, hash )
-   ) {
-      dbglog_error( "error generating password hash!\n" );
-      retval = RETVAL_DB;
-      goto cleanup;
-   }
+cleanup:
+
+   return retval;
+}
+
+int chatdb_b64_encode( unsigned char* in, size_t in_sz, bstring* out_p ) {
+   int retval = 0;
+   unsigned char* str = NULL;
+   size_t str_sz = 0;
+   size_t encoded_sz = 0;
 
    /* Base64-encode the hash. */
-   hash_str_sz = 4 * ((CHATDB_HASH_SZ + 2) / 3);
-   hash_str = calloc( CHATDB_HASH_SZ + 1, 1 );
-   if( NULL == hash_str ) {
+   str_sz = 4 * ((in_sz + 2) / 3);
+   str = calloc( str_sz + 1, 1 );
+   if( NULL == str ) {
       dbglog_error( "could not allocate hash encoded str!\n" );
       retval = RETVAL_ALLOC;
       goto cleanup;
    }
 
    /* TODO: Buffer size limit? */
-   encoded_sz = EVP_EncodeBlock( hash_str, hash, CHATDB_HASH_SZ );
-   if( encoded_sz != hash_str_sz ) {
+   encoded_sz = EVP_EncodeBlock( str, in, in_sz );
+   if( encoded_sz != str_sz ) {
       dbglog_error( "predicted hash sz: %lu but was: %lu\n",
-         hash_str_sz, encoded_sz );
+         str_sz, encoded_sz );
    }
 
-   *hash_out_p = bfromcstr( (char*)hash_str );
-   if( NULL == *hash_out_p ) {
-      dbglog_error( "could not allocate hash encoded bstring!\n" );
+   *out_p = bfromcstr( (char*)str );
+   if( NULL == *out_p ) {
+      dbglog_error( "could not allocate encoded bstring!\n" );
       retval = RETVAL_ALLOC;
+      goto cleanup;
+   }
+ 
+cleanup:
+
+   if( NULL != str ) {
+      free( str );
+   }
+
+   return retval;
+}
+
+int chatdb_hash_password(
+   bstring password, size_t password_iter,
+   bstring salt, bstring* hash_out_p
+) {
+   unsigned char hash_bin[CHATDB_HASH_SZ] = { 0 };
+   size_t salt_bin_sz = 0;
+   int retval = 0;
+   unsigned char* salt_bin = NULL;
+
+   retval = chatdb_b64_decode( salt, &salt_bin, &salt_bin_sz );
+   if( retval ) {
+      goto cleanup;
+   }
+
+   /* Generate the hash. */
+   if( !PKCS5_PBKDF2_HMAC(
+      bdata( password ), blength( password ),
+      salt_bin, salt_bin_sz, password_iter, EVP_sha256(),
+      CHATDB_HASH_SZ, hash_bin )
+   ) {
+      dbglog_error( "error generating password hash!\n" );
+      retval = RETVAL_DB;
+      goto cleanup;
+   }
+
+   /* TODO: Push hash size in DB. */
+   retval = chatdb_b64_encode( hash_bin, CHATDB_HASH_SZ, hash_out_p );
+   if( retval ) {
       goto cleanup;
    }
 
 cleanup:
 
-   if( NULL != hash_str ) {
-      free( hash_str );
+   if( NULL != salt_bin ) {
+      free( salt_bin );
    }
 
    return retval;
@@ -166,42 +197,23 @@ int chatdb_add_user(
    char* query = NULL;
    char* err_msg = NULL;
    unsigned char* salt_str = NULL;
-   size_t encoded_sz = 0;
-   size_t salt_str_sz = 0;
-   unsigned char salt[CHATDB_SALT_SZ] = { 0 };
+   unsigned char salt_bin[CHATDB_SALT_SZ] = { 0 };
    bstring hash = NULL;
    bstring salt = NULL;
 
    /* Generate a new salt. */
-   if( 1 != RAND_bytes( salt, CHATDB_SALT_SZ ) ) {
+   if( 1 != RAND_bytes( salt_bin, CHATDB_SALT_SZ ) ) {
       dbglog_error( "error generating random bytes!\n" );
       retval = RETVAL_DB;
       goto cleanup;
    }
 
-   /* Base64-encode the salt. */
-   salt_str_sz = 4 * ((CHATDB_SALT_SZ + 2) / 3);
-   salt_str = calloc( salt_str_sz + 1, 1 );
-   if( NULL == salt_str ) {
-      dbglog_error( "could not allocate salt encoded str!\n" );
-      retval = RETVAL_ALLOC;
+   retval = chatdb_b64_encode( salt_bin, CHATDB_SALT_SZ, &salt );
+   if( retval ) {
       goto cleanup;
    }
 
-   /* TODO: Buffer size limit? */
-   encoded_sz = EVP_EncodeBlock( salt_str, salt, CHATDB_SALT_SZ );
-   if( encoded_sz != salt_str_sz ) {
-      dbglog_error( "predicted salt sz: %lu but was: %lu\n",
-         salt_str_sz, encoded_sz );
-   }
-   salt = bfromcstr( salt_str );
-   if( NULL == salt ) {
-      dbglog_error( "coult not allocate salt encoded bstring!\n" );
-      retval = RETVAL_ALLOC;
-      goto cleanup;
-   }
-
-   retval = chatdb_hash_password( password, CHATDB_PASSWORD_ITER, salt, hash );
+   retval = chatdb_hash_password( password, CHATDB_PASSWORD_ITER, salt, &hash );
    if( retval ) {
       goto cleanup;
    }
@@ -211,7 +223,7 @@ int chatdb_add_user(
       "insert into users "
       "(user_name, hash, salt, iters) "
       "values('%q', '%q', '%q', '%d')",
-      bdata( user ), bdata( hash ), salt_str, CHATDB_PASSWORD_ITER );
+      bdata( user ), bdata( hash ), bdata( salt ), CHATDB_PASSWORD_ITER );
    if( NULL == query ) {
       dbglog_error( "could not allocate database user insert!\n" );
       retval = RETVAL_ALLOC;
@@ -226,6 +238,10 @@ int chatdb_add_user(
    }
 
 cleanup:
+
+   if( NULL != hash ) {
+      bdestroy( hash );
+   }
 
    if( NULL != salt ) {
       bdestroy( salt );

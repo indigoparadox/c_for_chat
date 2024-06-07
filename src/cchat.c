@@ -151,17 +151,6 @@ int cchat_route_user(
       goto cleanup;
    }
 
-   /* TODO: Create new salt. */
-
-#if 0
-   /* XXX */
-   FCGX_FPrintF( req->out, "Content-type: text/html\r\n" );
-   FCGX_FPrintF( req->out, "Status: 200\r\n\r\n" );
-   FCGX_FPrintF( req->out, "%s", bdata( user_decode ) );
-   FCGX_FPrintF( req->out, "<p>pwd: %s</p>", hash );
-#endif
-   /* TODO: Validate username and password. */
-
    dbglog_debug( 1, "adding user: %s\n", bdata( user ) );
 
    retval = chatdb_add_user(
@@ -170,15 +159,15 @@ int cchat_route_user(
 cleanup:
 
    /* Redirect to route. */
-   /*FCGX_FPrintF( req->out, "Status: 303 See Other\r\n" );
+   FCGX_FPrintF( req->out, "Status: 303 See Other\r\n" );
    if( NULL != err_msg ) {
       FCGX_FPrintF(
-         req->out, "Location: /chat?error=%s\r\n", bdata( err_msg ) );
+         req->out, "Location: /login?error=%s\r\n", bdata( err_msg ) );
    } else {
-      FCGX_FPrintF( req->out, "Location: /chat\r\n" );
+      FCGX_FPrintF( req->out, "Location: /login\r\n" );
    }
    FCGX_FPrintF( req->out, "Cache-Control: no-cache\r\n" );
-   FCGX_FPrintF( req->out, "\r\n" ); */
+   FCGX_FPrintF( req->out, "\r\n" ); 
 
    if( NULL != user_decode ) {
       bdestroy( user_decode );
