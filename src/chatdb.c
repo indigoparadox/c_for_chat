@@ -221,7 +221,7 @@ cleanup:
 }
 
 int chatdb_add_user(
-   sqlite3* db, bstring user, bstring password, bstring email,
+   sqlite3* db, int user_id, bstring user, bstring password, bstring email,
    bstring* err_msg_p
 ) {
    int retval = 0;
@@ -232,31 +232,67 @@ int chatdb_add_user(
    bstring hash = NULL;
    bstring salt = NULL;
 
-   /* Generate a new salt. */
-   if( 1 != RAND_bytes( salt_bin, CHATDB_SALT_SZ ) ) {
-      dbglog_error( "error generating random bytes!\n" );
-      retval = RETVAL_DB;
+   if( 0 == blength( user ) ) {
+      *err_msg_p = bfromcstr( "Username cannot be empty!" );
+      retval = RETVAL_PARAMS;
       goto cleanup;
    }
 
-   retval = chatdb_b64_encode( salt_bin, CHATDB_SALT_SZ, &salt );
-   if( retval ) {
+   dbglog_error( "%d\n", user_id );
+
+   if( 0 > user_id && 0 == blength( password ) ) {
+      *err_msg_p = bfromcstr( "New password cannot be empty!" );
+      retval = RETVAL_PARAMS;
       goto cleanup;
    }
 
-   retval = chatdb_hash_password(
-      password, CHATDB_PASSWORD_ITER, CHATDB_HASH_SZ, salt, &hash );
-   if( retval ) {
-      goto cleanup;
+   if( 0 > user_id || 0 < blength( password ) ) {
+   
+      /* Generate a new salt. */
+      if( 1 != RAND_bytes( salt_bin, CHATDB_SALT_SZ ) ) {
+         dbglog_error( "error generating random bytes!\n" );
+         retval = RETVAL_DB;
+         goto cleanup;
+      }
+
+      retval = chatdb_b64_encode( salt_bin, CHATDB_SALT_SZ, &salt );
+      if( retval ) {
+         goto cleanup;
+      }
+
+      /* Hash the provided password. */
+      retval = chatdb_hash_password(
+         password, CHATDB_PASSWORD_ITER, CHATDB_HASH_SZ, salt, &hash );
+      if( retval ) {
+         goto cleanup;
+      }
+
    }
 
-   /* Store the user record. */
-   query = sqlite3_mprintf(
-      "insert into users "
-      "(user_name, email, hash, hash_sz, salt, iters) "
-      "values('%q', '%q', '%q', '%d', '%q', '%d')",
-      bdata( user ), bdata( email ), bdata( hash ), CHATDB_HASH_SZ,
-      bdata( salt ), CHATDB_PASSWORD_ITER );
+   if( 0 > user_id ) {
+      /* Generate an "add user" query. */
+      query = sqlite3_mprintf(
+         "insert into users "
+         "(user_name, email, hash, hash_sz, salt, iters) "
+         "values('%q', '%q', '%q', '%d', '%q', '%d')",
+         bdata( user ), bdata( email ), bdata( hash ), CHATDB_HASH_SZ,
+         bdata( salt ), CHATDB_PASSWORD_ITER );
+
+      dbglog_debug( 1, "attempting to add user %s...\n", bdata( user ) );
+   } else {
+      /* Generate an "edit user" query. */
+      /* TODO: Add password if provided. */
+      query = sqlite3_mprintf(
+         "update users set "
+            "user_name = '%q', "
+            "email = '%q' "
+            "where user_id = '%d'",
+         bdata( user ), bdata( email ), user_id );
+
+      dbglog_debug( 1, "updating user %d...\n", user_id );
+   }
+
+   /* Check query. */
    if( NULL == query ) {
       dbglog_error( "could not allocate database user insert!\n" );
       retval = RETVAL_ALLOC;

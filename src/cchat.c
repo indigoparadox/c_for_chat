@@ -168,7 +168,7 @@ int cchar_profile_form(
             "<input type=\"password\" id=\"password2\" name=\"password2\" />"
                "</div>\n"
          "<div class=\"profile-field profile-button\">"
-            "<input type=\"submit\" name=\"submit\" value=\"Create\" /></div>\n"
+            "<input type=\"submit\" name=\"submit\" value=\"Submit\" /></div>\n"
       "</form>\n"
       "</div>\n",
       bdata( user_name ), bdata( email )
@@ -270,7 +270,7 @@ int cchat_route_user(
    dbglog_debug( 1, "adding user: %s\n", bdata( user ) );
 
    retval = chatdb_add_user(
-      db, user_decode, password1_decode, email_decode, &err_msg );
+      db, auth_user_id, user_decode, password1_decode, email_decode, &err_msg );
 
 cleanup:
 
@@ -279,6 +279,8 @@ cleanup:
    if( NULL != err_msg ) {
       FCGX_FPrintF(
          req->out, "Location: /profile?error=%s\r\n", bdata( err_msg ) );
+   } else if( 0 <= auth_user_id ) {
+      FCGX_FPrintF( req->out, "Location: /profile\r\n" );
    } else {
       FCGX_FPrintF( req->out, "Location: /login\r\n" );
    }

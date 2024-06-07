@@ -30,7 +30,7 @@ int chatdb_hash_password(
    bstring salt, bstring* hash_out_p );
 
 int chatdb_add_user(
-   sqlite3* db, bstring user, bstring password, bstring email,
+   sqlite3* db, int user_id, bstring user, bstring password, bstring email,
    bstring* err_msg_p );
 
 int chatdb_send_message(
