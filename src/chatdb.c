@@ -14,6 +14,7 @@ struct CHATDB_ARG {
    chatdb_iter_msg_cb_t cb_msg;
    chatdb_iter_user_cb_t cb_user;
    bstring page_text;
+   bstring password_test;
 };
 
 int chatdb_init( bstring path, sqlite3** db_p ) {
@@ -338,7 +339,7 @@ cleanup:
 
 int chatdb_iter_messages(
    bstring page_text, sqlite3* db,
-   int msg_type, int dest_id, chatdb_iter_msg_cb_t cb
+   int msg_type, int dest_id, chatdb_iter_msg_cb_t cb, bstring* err_msg_p
 ) {
    int retval = 0;
    char* err_msg = NULL;
@@ -354,7 +355,9 @@ int chatdb_iter_messages(
       chatdb_dbcb_messages, &arg_struct, &err_msg );
    if( SQLITE_OK != retval ) {
       /* TODO: Return err_msg. */
-      dbglog_error( "could not execute database message query!\n" );
+      dbglog_error( "could not execute database message query: %s\n",
+         err_msg );
+      *err_msg_p = bfromcstr( err_msg );
       retval = RETVAL_DB;
       goto cleanup;
    }
@@ -394,7 +397,7 @@ int chatdb_dbcb_users( void* arg, int argc, char** argv, char **col ) {
    }
 
    email = bfromcstr( argv[2] );
-   if( NULL == email ) { 
+   if( NULL == email && NULL != argv[2] ) { 
       dbglog_error( "error allocating email!\n" );
       retval = RETVAL_ALLOC;
       goto cleanup;
@@ -416,6 +419,7 @@ int chatdb_dbcb_users( void* arg, int argc, char** argv, char **col ) {
 
    retval = arg_struct->cb_user(
       arg_struct->page_text,
+      arg_struct->password_test,
       atoi( argv[0] ), /* user_id */
       user_name, /* user_name */
       email, /* email */
@@ -447,23 +451,43 @@ cleanup:
 
 int chatdb_iter_users(
    bstring page_text, sqlite3* db,
-   bstring user, chatdb_iter_user_cb_t cb
+   bstring user, bstring password_test, chatdb_iter_user_cb_t cb,
+   bstring* err_msg_p
 ) {
    int retval = 0;
    char* err_msg = NULL;
    struct CHATDB_ARG arg_struct;
+   char* query = NULL;
+   char* dyn_query = NULL;
 
    arg_struct.cb_user = cb;
    arg_struct.page_text = page_text;
+   arg_struct.password_test = password_test;
+
+   if( NULL != user ) {
+      dyn_query = sqlite3_mprintf(
+         "select user_id, user_name, email, hash, salt, iters, "
+            "strftime('%%s', join_time) from users where user_name = '%q'",
+         bdata( user ) );
+      query = dyn_query;
+   } else {
+      query = "select user_id, user_name, email, hash, salt, iters, "
+         "strftime('%s', join_time) from users";
+   }
+
+   if( NULL == query ) {
+      dbglog_error( "could not allocate database user select!\n" );
+      retval = RETVAL_ALLOC;
+      goto cleanup;
+   }
 
    /* Create schema table if it doesn't exist. */
-   retval = sqlite3_exec( db,
-      "select user_id, user_name, email, hash, salt, iters "
-         "strftime('%s', join_time) from users",
-      chatdb_dbcb_users, &arg_struct, &err_msg );
+   retval = sqlite3_exec( db, query, chatdb_dbcb_users, &arg_struct, &err_msg );
    if( SQLITE_OK != retval ) {
       /* TODO: Return err_msg. */
-      dbglog_error( "could not execute database message query!\n" );
+      dbglog_error(
+         "could not execute database user query: %s\n", err_msg );
+      *err_msg_p = bfromcstr( err_msg );
       retval = RETVAL_DB;
       goto cleanup;
    }
@@ -475,6 +499,10 @@ cleanup:
 
    if( NULL != err_msg ) {
       sqlite3_free( err_msg );
+   }
+
+   if( NULL != dyn_query ) {
+      sqlite3_free( dyn_query );
    }
 
    return retval;

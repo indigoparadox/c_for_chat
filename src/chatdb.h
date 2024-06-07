@@ -9,7 +9,7 @@ typedef int (*chatdb_iter_msg_cb_t)(
    int msg_id, int msg_type, int from, int to, bstring text, time_t msg_time );
 
 typedef int (*chatdb_iter_user_cb_t)(
-   bstring page_text, size_t user_id,
+   bstring page_text, bstring password_test, size_t user_id,
    bstring user_name, bstring email, bstring hash, bstring salt,
    size_t iters, time_t msg_time );
 
@@ -32,7 +32,12 @@ int chatdb_send_message( sqlite3* db, bstring msg, bstring* err_msg_p );
 
 int chatdb_iter_messages(
    bstring page_text, sqlite3* db,
-   int msg_type, int dest_id, chatdb_iter_msg_cb_t cb );
+   int msg_type, int dest_id, chatdb_iter_msg_cb_t cb, bstring* err_msg_p);
+
+int chatdb_iter_users(
+   bstring page_text, sqlite3* db,
+   bstring user, bstring password_test,
+   chatdb_iter_user_cb_t cb, bstring* err_msg_p );
 
 #endif /* !CHATDB_H */
 

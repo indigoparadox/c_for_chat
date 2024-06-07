@@ -221,6 +221,36 @@ int cchat_route_login(
    return retval;
 }
 
+int cchat_auth_user_cb(
+   bstring page_text, bstring password_test, size_t user_id,
+   bstring user_name, bstring email, bstring hash, bstring salt,
+   size_t iters, time_t msg_time
+) {
+   int retval = 0;
+   bstring hash_test = NULL;
+
+   assert( NULL != password_test );
+   dbglog_error( "test: %s\n", bdata( password_test ) );
+
+   retval = chatdb_hash_password( password_test, iters, salt, &hash_test );
+   if( retval ) {
+      goto cleanup;
+   }
+
+   /* Test the provided password. */
+   if( 0 != bstrcmp( hash, hash_test ) ) {
+      retval = RETVAL_AUTH;
+   }
+
+cleanup:
+
+   if( NULL != hash_test ) {
+      bdestroy( hash_test );
+   }
+
+   return retval;
+}
+
 int cchat_route_auth(
    FCGX_Request* req, struct bstrList* q, struct bstrList* p, sqlite3* db
 ) {
@@ -230,6 +260,10 @@ int cchat_route_auth(
    bstring password = NULL;
    bstring password_decode = NULL;
    bstring err_msg = NULL;
+   bstring hash = NULL;
+
+   /* XXX */
+   bstring page_text_temp = NULL;
 
    dbglog_debug( 1, "route: auth\n" );
 
@@ -242,28 +276,34 @@ int cchat_route_auth(
    cchat_decode_field( user );
    cchat_decode_field( password );
 
-#if 0
-   /* XXX */
-   FCGX_FPrintF( req->out, "Content-type: text/html\r\n" );
-   FCGX_FPrintF( req->out, "Status: 200\r\n\r\n" );
-   FCGX_FPrintF( req->out, "%s", bdata( user_decode ) );
-   FCGX_FPrintF( req->out, "<p>pwd: %s</p>", hash );
-#endif
+   /* Validate username and password. */
+   retval = chatdb_iter_users(
+      page_text_temp, db, user_decode, password_decode,
+      cchat_auth_user_cb, &err_msg );
+   if( retval ) {
+      assert( NULL != err_msg );
+      bassigncstr( err_msg, "Invalid username or password!" );
+      goto cleanup;
+   }
 
-   /* TODO: Validate username and password. */
+   /* TODO: Set auth cookie. */
 
 cleanup:
 
    /* Redirect to route. */
-   /*FCGX_FPrintF( req->out, "Status: 303 See Other\r\n" );
+   FCGX_FPrintF( req->out, "Status: 303 See Other\r\n" );
    if( NULL != err_msg ) {
       FCGX_FPrintF(
-         req->out, "Location: /chat?error=%s\r\n", bdata( err_msg ) );
+         req->out, "Location: /login?error=%s\r\n", bdata( err_msg ) );
    } else {
       FCGX_FPrintF( req->out, "Location: /chat\r\n" );
    }
    FCGX_FPrintF( req->out, "Cache-Control: no-cache\r\n" );
-   FCGX_FPrintF( req->out, "\r\n" ); */
+   FCGX_FPrintF( req->out, "\r\n" );
+
+   if( NULL != hash ) {
+      bdestroy( hash );
+   }
 
    if( NULL != user_decode ) {
       bdestroy( user_decode );
@@ -388,6 +428,7 @@ int cchat_route_chat(
    int retval = 0;
    bstring page_text = NULL;
    struct tagbstring page_title = bsStatic( "Chat" );
+   bstring err_msg = NULL;
 
    page_text = bfromcstr( "" );
 
@@ -398,7 +439,8 @@ int cchat_route_chat(
       retval = RETVAL_ALLOC;
       goto cleanup;
    }
-   retval = chatdb_iter_messages( page_text, db, 0, 0, cchat_print_msg_cb );
+   retval = chatdb_iter_messages(
+      page_text, db, 0, 0, cchat_print_msg_cb, &err_msg );
    if( retval ) {
       goto cleanup;
    }
@@ -407,6 +449,10 @@ int cchat_route_chat(
       dbglog_error( "error ending table!\n" );
       retval = RETVAL_ALLOC;
       goto cleanup;
+   }
+
+   if( NULL != err_msg ) {
+      retval = bconcat( page_text, err_msg );
    }
 
    /* Show chat input form. */
@@ -428,6 +474,10 @@ cleanup:
 
    if( NULL != page_text ) {
       bdestroy( page_text );
+   }
+
+   if( NULL != err_msg ) {
+      bdestroy( err_msg );
    }
 
    return retval;
