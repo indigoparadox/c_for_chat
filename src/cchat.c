@@ -7,11 +7,26 @@ typedef int (*cchat_route_cb_t)(
    FCGX_Request* req, struct bstrList* q, struct bstrList* p, sqlite3* db );
 
 #define CCHAT_ROUTES_TABLE( f ) \
+   f( "/profile", cchat_route_profile, "GET" ) \
+   f( "/user", cchat_route_user, "POST" ) \
    f( "/login", cchat_route_login, "GET" ) \
    f( "/auth", cchat_route_auth, "POST" ) \
    f( "/send", cchat_route_send, "POST" ) \
    f( "/chat", cchat_route_chat, "GET" ) \
    f( "", NULL, "" )
+
+#define cchat_decode_field( field_name ) \
+   retval = bcgi_query_key( p, #field_name, &field_name ); \
+   if( retval || NULL == field_name ) { \
+      err_msg = bfromcstr( "Invalid " #field_name "!" ); \
+      dbglog_error( "no " #field_name " found!\n" ); \
+      retval = RETVAL_PARAMS; \
+      goto cleanup; \
+   } \
+   retval = bcgi_urldecode( field_name, &field_name ## _decode ); \
+   if( retval ) { \
+      goto cleanup; \
+   }
 
 static int cchat_page(
    FCGX_Request* req, struct bstrList* q, struct bstrList* p,
@@ -83,10 +98,136 @@ cleanup:
 
 }
 
+int cchat_route_profile(
+   FCGX_Request* req, struct bstrList* q, struct bstrList* p, sqlite3* db
+) {
+   int retval = 0;
+   struct tagbstring page_title = bsStatic( "Chat" );
+   struct tagbstring page_text = bsStatic(
+      "<form action=\"/user\" method=\"post\">\n"
+         "<div class=\"login-field\">"
+            "<input type=\"text\" name=\"user\" /></div>\n"
+         "<div class=\"login-field\">"
+            "<input type=\"password\" name=\"password1\" /></div>\n"
+         "<div class=\"login-field\">"
+            "<input type=\"password\" name=\"password2\" /></div>\n"
+         "<div class=\"login-field login-button\">"
+            "<input type=\"submit\" name=\"submit\" value=\"Create\" /></div>\n"
+      "</form>\n" );
+
+   retval = cchat_page( req, q, p, &page_title, &page_text );
+
+   return retval;
+}
+
+int cchat_route_user(
+   FCGX_Request* req, struct bstrList* q, struct bstrList* p, sqlite3* db
+) {
+   int retval = 0;
+   bstring user = NULL;
+   bstring user_decode = NULL;
+   bstring password1 = NULL;
+   bstring password1_decode = NULL;
+   bstring password2 = NULL;
+   bstring password2_decode = NULL;
+   bstring err_msg = NULL;
+
+
+   dbglog_debug( 1, "route: user\n" );
+
+   if( NULL == p ) {
+      err_msg = bfromcstr( "Invalid message format!" );
+      goto cleanup;
+   }
+
+   /* There is POST data, so try to decode it. */
+   cchat_decode_field( user );
+   cchat_decode_field( password1 );
+   cchat_decode_field( password2 );
+
+   if( 0 != bstrcmp( password1, password2 ) ) {
+      dbglog_error( "password fields do no match!\n" );
+      err_msg = bfromcstr( "Password fields do not match!" );
+      goto cleanup;
+   }
+
+   /* TODO: Create new salt. */
+
+#if 0
+   /* XXX */
+   FCGX_FPrintF( req->out, "Content-type: text/html\r\n" );
+   FCGX_FPrintF( req->out, "Status: 200\r\n\r\n" );
+   FCGX_FPrintF( req->out, "%s", bdata( user_decode ) );
+   FCGX_FPrintF( req->out, "<p>pwd: %s</p>", hash );
+#endif
+   /* TODO: Validate username and password. */
+
+   dbglog_debug( 1, "adding user: %s\n", bdata( user ) );
+
+   retval = chatdb_add_user(
+      db, user_decode, password1_decode, &err_msg );
+
+cleanup:
+
+   /* Redirect to route. */
+   /*FCGX_FPrintF( req->out, "Status: 303 See Other\r\n" );
+   if( NULL != err_msg ) {
+      FCGX_FPrintF(
+         req->out, "Location: /chat?error=%s\r\n", bdata( err_msg ) );
+   } else {
+      FCGX_FPrintF( req->out, "Location: /chat\r\n" );
+   }
+   FCGX_FPrintF( req->out, "Cache-Control: no-cache\r\n" );
+   FCGX_FPrintF( req->out, "\r\n" ); */
+
+   if( NULL != user_decode ) {
+      bdestroy( user_decode );
+   }
+
+   if( NULL != user ) {
+      bdestroy( user );
+   }
+
+   if( NULL != password1_decode ) {
+      bdestroy( password1_decode );
+   }
+
+   if( NULL != password1 ) {
+      bdestroy( password1 );
+   }
+
+   if( NULL != password2_decode ) {
+      bdestroy( password2_decode );
+   }
+
+   if( NULL != password2 ) {
+      bdestroy( password2 );
+   }
+
+   if( NULL != err_msg ) {
+      bdestroy( err_msg );
+   }
+
+   return retval;
+
+}
+
 int cchat_route_login(
    FCGX_Request* req, struct bstrList* q, struct bstrList* p, sqlite3* db
 ) {
    int retval = 0;
+   struct tagbstring page_title = bsStatic( "Chat" );
+   struct tagbstring page_text = bsStatic(
+      "<form action=\"/auth\" method=\"post\">\n"
+         "<div class=\"login-field\">"
+            "<input type=\"text\" name=\"user\" /></div>\n"
+         "<div class=\"login-field\">"
+            "<input type=\"password\" name=\"password\" /></div>\n"
+         "<div class=\"login-field login-button\">"
+            "<input type=\"submit\" name=\"submit\" value=\"Login\" /></div>\n"
+      "</form>\n" );
+
+   retval = cchat_page( req, q, p, &page_title, &page_text );
 
    return retval;
 }
@@ -95,44 +236,94 @@ int cchat_route_auth(
    FCGX_Request* req, struct bstrList* q, struct bstrList* p, sqlite3* db
 ) {
    int retval = 0;
+   bstring user = NULL;
+   bstring user_decode = NULL;
+   bstring password = NULL;
+   bstring password_decode = NULL;
+   bstring err_msg = NULL;
+
+   dbglog_debug( 1, "route: auth\n" );
+
+   if( NULL == p ) {
+      err_msg = bfromcstr( "Invalid message format!" );
+      goto cleanup;
+   }
+
+   /* There is POST data, so try to decode it. */
+   cchat_decode_field( user );
+   cchat_decode_field( password );
+
+#if 0
+   /* XXX */
+   FCGX_FPrintF( req->out, "Content-type: text/html\r\n" );
+   FCGX_FPrintF( req->out, "Status: 200\r\n\r\n" );
+   FCGX_FPrintF( req->out, "%s", bdata( user_decode ) );
+   FCGX_FPrintF( req->out, "<p>pwd: %s</p>", hash );
+#endif
+
+   /* TODO: Validate username and password. */
+
+cleanup:
+
+   /* Redirect to route. */
+   /*FCGX_FPrintF( req->out, "Status: 303 See Other\r\n" );
+   if( NULL != err_msg ) {
+      FCGX_FPrintF(
+         req->out, "Location: /chat?error=%s\r\n", bdata( err_msg ) );
+   } else {
+      FCGX_FPrintF( req->out, "Location: /chat\r\n" );
+   }
+   FCGX_FPrintF( req->out, "Cache-Control: no-cache\r\n" );
+   FCGX_FPrintF( req->out, "\r\n" ); */
+
+   if( NULL != user_decode ) {
+      bdestroy( user_decode );
+   }
+
+   if( NULL != user ) {
+      bdestroy( user );
+   }
+
+   if( NULL != password_decode ) {
+      bdestroy( password_decode );
+   }
+
+   if( NULL != password ) {
+      bdestroy( password );
+   }
+
+   if( NULL != err_msg ) {
+      bdestroy( err_msg );
+   }
 
    return retval;
+
 }
 
 int cchat_route_send(
    FCGX_Request* req, struct bstrList* q, struct bstrList* p, sqlite3* db
 ) {
    int retval = 0;
-   bstring msg_text = NULL;
-   bstring msg_text_decode = NULL;
+   bstring chat = NULL;
+   bstring chat_decode = NULL;
    bstring err_msg = NULL;
 
    dbglog_debug( 1, "route: send\n" );
 
-   if( NULL != p ) {
-      retval = bcgi_query_key( p, "chat", &msg_text );
-      if( retval ) {
-         goto cleanup;
-      }
-
-      if( NULL == msg_text ) {
-         dbglog_error( "no message text found!\n" );
-         retval = RETVAL_PARAMS;
-         goto cleanup;
-      }
-
-      dbglog_debug( 1, "msg_text: %s\n", bdata( msg_text ) );
-
-      retval = bcgi_urldecode( msg_text, &msg_text_decode );
-      if( retval ) {
-         goto cleanup;
-      }
-
-      retval = chatdb_send_message( db, msg_text_decode, &err_msg );
-      if( retval ) {
-         goto cleanup;
-      }
+   if( NULL == p ) {
+      err_msg = bfromcstr( "Invalid message format!" );
+      goto cleanup;
    }
+
+   /* There is POST data, so try to decode it. */
+   cchat_decode_field( chat );
+
+   retval = chatdb_send_message( db, chat_decode, &err_msg );
+   if( retval ) {
+      goto cleanup;
+   }
+
+cleanup:
 
    /* Redirect to route. */
    FCGX_FPrintF( req->out, "Status: 303 See Other\r\n" );
@@ -145,14 +336,12 @@ int cchat_route_send(
    FCGX_FPrintF( req->out, "Cache-Control: no-cache\r\n" );
    FCGX_FPrintF( req->out, "\r\n" );
 
-cleanup:
-
-   if( NULL != msg_text_decode ) {
-      bdestroy( msg_text_decode );
+   if( NULL != chat_decode ) {
+      bdestroy( chat_decode );
    }
 
-   if( NULL != msg_text ) {
-      bdestroy( msg_text );
+   if( NULL != chat ) {
+      bdestroy( chat );
    }
 
    if( NULL != err_msg ) {

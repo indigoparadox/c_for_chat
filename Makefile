@@ -12,7 +12,7 @@ LDFLAGS := -g -fsanitize=undefined -fsanitize=leak -fsanitize=address
 all: cchat
 
 cchat: $(addprefix obj/,$(subst .c,.o,$(FLOPPCGI_SOURCES)))
-	$(CC) -o $@ $^ $(LDFLAGS) -lfcgi -lsqlite3
+	$(CC) -o $@ $^ $(LDFLAGS) -lfcgi -lsqlite3 -lssl -lcrypto
 
 obj/%.o: %.c
 	mkdir -p $(dir $@)

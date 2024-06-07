@@ -10,8 +10,6 @@
 static int _bcgi_urldecode_entity( bstring out, bstring decode ) {
    int retval = 0;
 
-   dbglog_debug( 1, "decoding entity: %s", bdata( decode ) );
-
    retval = bconchar( out, (char)strtol( (char*)decode->data, NULL, 16 ) );
    if( BSTR_ERR == retval ) {
       retval = RETVAL_PARAMS;
@@ -53,7 +51,6 @@ int bcgi_urldecode( bstring in, bstring* out_p ) {
    }
 
    while( i_in < blength( in ) ) {
-      dbglog_debug( 1, "state: %d, char: %c\n", state, bchar( in, i_in ) );
       switch( state ) {
       case URLDECODE_STATE_INSIDE:
          if(
