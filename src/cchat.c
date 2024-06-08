@@ -453,7 +453,13 @@ int cchat_route_login(
    int retval = 0;
    struct CCHAT_PAGE page = { 0, 0, 0 };
    struct tagbstring page_title = bsStatic( "Login" );
-   struct tagbstring page_text = bsStatic(
+   bstring recaptcha_site_key = NULL;
+
+   recaptcha_site_key = bfromcstr(
+      FCGX_GetParam( "CCHAT_RECAPTCHA_SITE", req->envp ) );
+   /* It's fine if this turns out to be NULL. */
+
+   page.text = bfromcstr(
       "<div class=\"login-form\">\n"
       "<form action=\"/auth\" method=\"post\">\n"
          "<div class=\"login-field\">"
@@ -463,16 +469,40 @@ int cchat_route_login(
             "<label for=\"password\">Password: </label>"
             "<input type=\"password\" id=\"password\" name=\"password\" />"
                "</div>\n"
-         "<div class=\"login-field login-button\">"
-            "<input type=\"submit\" name=\"submit\" value=\"Login\" /></div>\n"
-      "</form>\n"
-      "</div>\n" );
+   );
+   bcgi_check_null( page.text );
 
-   page.text = &page_text;
+   if( NULL != bdata( recaptcha_site_key ) ) {
+      retval = bformata( page.text,
+         "<div class=\"g-recaptcha\" data-sitekey=\"%s\"></div>\n",
+         bdata( recaptcha_site_key ) );
+      if( BSTR_ERR == retval ) {
+         dbglog_error( "unable to allocate profile form!\n" );
+         retval = RETVAL_ALLOC;
+         goto cleanup;
+      }
+
+      assert( NULL == page.scripts );
+      page.scripts = bfromcstr(
+         "<script src=\"https://www.google.com/recaptcha/api.js\" "
+            "async defer></script>\n" );
+      bcgi_check_null( page.scripts );
+   }
+
+   retval = bcatcstr( page.text,
+      "<div class=\"login-field login-button\">"
+         "<input type=\"submit\" name=\"submit\" value=\"Login\" /></div>\n"
+      "</form>\n</div>\n" );
+   bcgi_check_bstr_err( page.text );
+
    page.title = &page_title;
 
-   retval = cchat_page(
-      req, q, p, &page, CCHAT_PAGE_FLAG_NONAV );
+   retval = cchat_page( req, q, p, &page, CCHAT_PAGE_FLAG_NONAV );
+
+cleanup:
+
+   bcgi_cleanup_bstr( page.text, likely );
+   bcgi_cleanup_bstr( recaptcha_site_key, likely );
 
    return retval;
 }
@@ -528,12 +558,26 @@ int cchat_route_auth(
    bstring hash = NULL;
    bstring remote_host = NULL;
    int user_id = -1;
+   bstring recaptcha = NULL;
+   bstring recaptcha_decode = NULL;
 
    dbglog_debug( 1, "route: auth\n" );
 
    if( NULL == p ) {
       err_msg = bfromcstr( "Invalid message format!" );
       goto cleanup;
+   }
+
+   /* Validate recaptcha. */
+   cchat_decode_field_rename( p, recaptcha, g-recaptcha-response );
+   if( NULL != recaptcha_decode ) {
+      retval = webutil_check_recaptcha( req, recaptcha_decode );
+      if( retval ) {
+         assert( NULL == err_msg );
+         err_msg = bfromcstr( "Invalid ReCAPTCHA response!" );
+         bcgi_check_null( err_msg );
+         goto cleanup;
+      }
    }
 
    /* There is POST data, so try to decode it. */
@@ -586,33 +630,15 @@ cleanup:
    FCGX_FPrintF( req->out, "Cache-Control: no-cache\r\n" );
    FCGX_FPrintF( req->out, "\r\n" );
 
-   if( NULL != remote_host ) {
-      bdestroy( remote_host );
-   }
-
-   if( NULL != hash ) {
-      bdestroy( hash );
-   }
-
-   if( NULL != user_decode ) {
-      bdestroy( user_decode );
-   }
-
-   if( NULL != user ) {
-      bdestroy( user );
-   }
-
-   if( NULL != password_decode ) {
-      bdestroy( password_decode );
-   }
-
-   if( NULL != password ) {
-      bdestroy( password );
-   }
-
-   if( NULL != err_msg ) {
-      bdestroy( err_msg );
-   }
+   bcgi_cleanup_bstr( remote_host, likely );
+   bcgi_cleanup_bstr( hash, likely );
+   bcgi_cleanup_bstr( user, likely );
+   bcgi_cleanup_bstr( user_decode, likely );
+   bcgi_cleanup_bstr( password, likely );
+   bcgi_cleanup_bstr( password_decode, likely );
+   bcgi_cleanup_bstr( recaptcha, likely );
+   bcgi_cleanup_bstr( recaptcha_decode, likely );
+   bcgi_cleanup_bstr( err_msg, unlikely );
 
    return retval;
 
