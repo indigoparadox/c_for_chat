@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <stdlib.h> /* for atoi() */
 
+#include <curl/curl.h>
+
 typedef int (*cchat_route_cb_t)(
    FCGX_Request* req, int auth_user_id,
    struct bstrList* q, struct bstrList* p, struct bstrList* c, sqlite3* db );
@@ -22,11 +24,11 @@ typedef int (*cchat_route_cb_t)(
    f( "/", cchat_route_root, "GET" ) \
    f( "", NULL, "" )
 
-#define cchat_decode_field( list, field_name ) \
-   retval = bcgi_query_key( list, #field_name, &field_name ); \
+#define cchat_decode_field_rename( list, field_name, post_name ) \
+   retval = bcgi_query_key( list, #post_name, &field_name ); \
    if( retval || NULL == field_name ) { \
-      err_msg = bfromcstr( "Invalid " #field_name "!" ); \
-      dbglog_error( "no " #field_name " found!\n" ); \
+      err_msg = bfromcstr( "Invalid " #post_name "!" ); \
+      dbglog_error( "no " #post_name " found!\n" ); \
       retval = RETVAL_PARAMS; \
       goto cleanup; \
    } \
@@ -34,6 +36,9 @@ typedef int (*cchat_route_cb_t)(
    if( retval ) { \
       goto cleanup; \
    }
+
+#define cchat_decode_field( list, field_name ) \
+   cchat_decode_field_rename( list, field_name, field_name );
 
 static int cchat_page(
    FCGX_Request* req, struct bstrList* q, struct bstrList* p,
@@ -329,6 +334,17 @@ cleanup:
    return retval;
 }
 
+static int cchat_curl_writer(
+   char *data, size_t size, size_t nmemb, bstring writer_data
+) {
+
+   /* TODO: More error checking! */
+
+   bcatblk( writer_data, data, size * nmemb );
+
+   return size * nmemb;
+}
+
 int cchat_route_user(
    FCGX_Request* req, int auth_user_id,
    struct bstrList* q, struct bstrList* p, struct bstrList* c, sqlite3* db
@@ -346,6 +362,14 @@ int cchat_route_user(
    bstring session = NULL;
    bstring csrf = NULL;
    bstring csrf_decode = NULL;
+   bstring recaptcha = NULL;
+   bstring recaptcha_decode = NULL;
+   bstring recaptcha_secret_key = NULL;
+   bstring recaptcha_curl_post = NULL;
+   bstring remote_host = NULL;
+   bstring curl_buffer = NULL;
+   CURL* curl = NULL;
+   CURLcode curl_res;
 
    dbglog_debug( 1, "route: user\n" );
 
@@ -373,6 +397,76 @@ int cchat_route_user(
          retval = RETVAL_PARAMS;
          goto cleanup;
       }
+   }
+
+   cchat_decode_field_rename( p, recaptcha, g-recaptcha-response );
+   /* XXX */
+   dbglog_debug( 1, "%s\n", bdata( recaptcha ) );
+   if( NULL != recaptcha ) {
+
+      /* TODO: Move this into its own function. */
+
+      recaptcha_secret_key = bfromcstr(
+         FCGX_GetParam( "CCHAT_RECAPTCHA_SECRET", req->envp ) );
+      if( NULL == recaptcha_secret_key ) {
+         dbglog_error( "could not allocate CURL secret key!\n" );
+         retval = RETVAL_ALLOC;
+         goto cleanup;
+      }
+
+      remote_host = bfromcstr( FCGX_GetParam( "REMOTE_ADDR", req->envp ) );
+      if( NULL == remote_host ) {
+         dbglog_error( "could not allocate remote host!\n" );
+         retval = RETVAL_ALLOC;
+         goto cleanup;
+      }
+
+      /* Format POST fields for Google. */
+      recaptcha_curl_post = bformat( "secret=%s&response=%s&remoteip=%s",
+         bdata( recaptcha_secret_key ),
+         bdata( recaptcha_decode ),
+         bdata( remote_host ) );
+      if( NULL == recaptcha_curl_post ) {
+         dbglog_error( "could not allocate CURL post fields!\n" );
+         retval = RETVAL_ALLOC;
+         goto cleanup;
+      }
+
+      /* Setup CURL handle. */
+      curl = curl_easy_init();
+      if( !curl ) {
+         dbglog_error( "could not init CURL handle!\n" );
+         retval = RETVAL_PARAMS;
+         goto cleanup;
+      }
+
+      curl_buffer = bfromcstr( "" );
+      if( NULL == curl_buffer ) {
+         dbglog_error( "could not allocate CURL buffer!\n" );
+         retval = RETVAL_ALLOC;
+         goto cleanup;
+      }
+
+      curl_easy_setopt( curl, CURLOPT_URL,
+         "https://www.google.com/recaptcha/api/siteverify" );
+      curl_easy_setopt( curl, CURLOPT_POSTFIELDS,
+         bdata( recaptcha_curl_post ) );
+      curl_easy_setopt( curl, CURLOPT_WRITEFUNCTION, cchat_curl_writer );
+      curl_easy_setopt( curl, CURLOPT_WRITEDATA, curl_buffer );
+
+      curl_res = curl_easy_perform( curl );
+      if( CURLE_OK != curl_res ) {
+         dbglog_error( "problem verifying recaptcha: %s\n",
+            curl_easy_strerror( curl_res ) );
+         retval = RETVAL_PARAMS;
+      }
+
+      /* XXX */
+      dbglog_debug( 1, "%s", bdata( curl_buffer ) );
+
+      /* TODO: Extract/verify response from curl_buffer. */
+
+      curl_easy_cleanup( curl );
    }
 
    /* There is POST data, so try to decode it. */
@@ -406,6 +500,30 @@ cleanup:
    }
    FCGX_FPrintF( req->out, "Cache-Control: no-cache\r\n" );
    FCGX_FPrintF( req->out, "\r\n" ); 
+
+   if( NULL != curl_buffer ) {
+      bdestroy( curl_buffer );
+   }
+
+   if( NULL != remote_host ) {
+      bdestroy( remote_host );
+   }
+
+   if( NULL != recaptcha_curl_post ) {
+      bdestroy( recaptcha_curl_post );
+   }
+
+   if( NULL != recaptcha_secret_key ) {
+      bdestroy( recaptcha_secret_key );
+   }
+
+   if( NULL != recaptcha ) {
+      bdestroy( recaptcha );
+   }
+
+   if( NULL != recaptcha_decode ) {
+      bdestroy( recaptcha_decode );
+   }
 
    if( NULL != csrf ) {
       bdestroy( csrf );
@@ -1039,7 +1157,7 @@ int cchat_handle_req( FCGX_Request* req, sqlite3* db ) {
          retval = RETVAL_ALLOC;
          goto cleanup;
       }
- 
+
       /* Split post_buf into a key/value array. */
       post_buf_list = bsplit( post_buf, '&' );
       if( NULL == post_buf_list ) {

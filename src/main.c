@@ -5,6 +5,8 @@
 
 #include <string.h> /* for memset() */
 
+#include <curl/curl.h>
+
 int main() {
    FCGX_Request req;
    int cgi_sock = -1;
@@ -20,6 +22,8 @@ int main() {
    assert( NULL != g_dbglog_file );
 
    dbglog_debug( 1, "initializing...\n" );
+
+   curl_global_init( CURL_GLOBAL_ALL );
 
    retval = chatdb_init( &chatdb_path, &db );
    if( retval ) {
@@ -49,6 +53,8 @@ cleanup:
    if( NULL != db ) {
       chatdb_close( &db );
    }
+
+   curl_global_cleanup();
 
    dbglog_shutdown();
 
