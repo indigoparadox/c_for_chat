@@ -296,7 +296,7 @@ int bcgi_parse_json( struct BCGI_JSON_NODE** root_p, bstring buffer ) {
 
 cleanup:
 
-   bcgi_cleanup_bstr( token, bcgi_unlikely );
+   bcgi_cleanup_bstr( token, likely );
 
    return retval;
 }

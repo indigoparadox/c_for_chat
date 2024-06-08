@@ -1,7 +1,7 @@
 
 # vim: ft=make noexpandtab
 
-CCHAT_SOURCES := src/main.c src/bstrlib.c src/cchat.c src/chatdb.c src/bcgi.c
+CCHAT_SOURCES := src/main.c src/bstrlib.c src/cchat.c src/chatdb.c src/bcgi.c src/webutil.c
 
 PKG_CFG_DEPS := sqlite3 libcurl openssl libcrypto
 
