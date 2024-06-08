@@ -10,8 +10,8 @@
 #include "bstrlib.h"
 #include "retval.h"
 
-#include "chatdb.h"
 #include "cchat.h"
+#include "chatdb.h"
 #include "bcgi.h"
 #include "dbglog.h"
 

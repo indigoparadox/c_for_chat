@@ -37,7 +37,7 @@ typedef int (*cchat_route_cb_t)(
 
 static int cchat_page(
    FCGX_Request* req, struct bstrList* q, struct bstrList* p,
-   bstring page_title, bstring page_text, uint8_t flags
+   struct CCHAT_PAGE* page, uint8_t flags
 ) {
    int retval = 0;
    size_t i = 0;
@@ -49,12 +49,15 @@ static int cchat_page(
    FCGX_FPrintF( req->out, "Status: 200\r\n\r\n" );
 
    FCGX_FPrintF( req->out, "<html>\n" );
-   FCGX_FPrintF( req->out, "<head><title>%s</title>\n", bdata( page_title ) );
+   FCGX_FPrintF( req->out, "<head><title>%s</title>\n", bdata( page->title ) );
    FCGX_FPrintF( req->out, "<link rel=\"stylesheet\" href=\"style.css\" />\n" );
+   if( NULL != page->scripts ) {
+      FCGX_FPrintF( req->out, "%s", bdata( page->scripts ) );
+   }
    FCGX_FPrintF( req->out, "</head>\n" );
    FCGX_FPrintF( req->out, "<body>\n" );
    FCGX_FPrintF( req->out, "<h1 class=\"page-title\">%s</h1>\n",
-      bdata( page_title ) );
+      bdata( page->title ) );
    if( CCHAT_PAGE_FLAG_NONAV != (CCHAT_PAGE_FLAG_NONAV & flags) ) {
       FCGX_FPrintF( req->out, "<ul class=\"page-nav\">\n" );
       FCGX_FPrintF( req->out, "<li><a href=\"/chat\">Chat</a>\n" );
@@ -92,7 +95,7 @@ static int cchat_page(
       }
    }
 
-   FCGX_FPrintF( req->out, "%s", bdata( page_text ) );
+   FCGX_FPrintF( req->out, "%s", bdata( page->text ) );
 
 cleanup:
 
@@ -142,13 +145,14 @@ int cchat_route_logout(
    return retval;
 }
 
-int cchat_profile_form(
-   bstring page_text, bstring user_name, bstring email, bstring session
+static int cchat_profile_form(
+   struct CCHAT_PAGE* page, bstring user_name, bstring email, bstring session,
+   bstring recaptcha_site_key
 ) {
    int retval = 0;
 
    retval = bassignformat(
-      page_text,
+      page->text,
       "<div class=\"profile-form\">\n"
       "<form action=\"/user\" method=\"post\">\n"
          "<div class=\"profile-field\">"
@@ -166,10 +170,7 @@ int cchat_profile_form(
          "<div class=\"profile-field\">"
             "<label for=\"password2\">Confirm password: </label>"
             "<input type=\"password\" id=\"password2\" name=\"password2\" />"
-               "</div>\n"
-         "<div class=\"profile-field profile-button\">"
-            "<input type=\"submit\" name=\"submit\" value=\"Submit\" />"
-         "</div>\n",
+               "</div>\n",
       bdata( user_name ), bdata( email )
    );
 
@@ -180,7 +181,7 @@ int cchat_profile_form(
    }
 
    if( NULL != session ) {
-      retval = bformata( page_text,
+      retval = bformata( page->text,
          "<input type=\"hidden\" name=\"csrf\" value=\"%s\" />\n",
          bdata( session ) );
       if( BSTR_ERR == retval ) {
@@ -190,7 +191,31 @@ int cchat_profile_form(
       }
    }
 
-   retval = bcatcstr( page_text, "</form>\n</div>\n" );
+   if( NULL != bdata( recaptcha_site_key ) ) {
+      retval = bformata( page->text,
+         "<div class=\"g-recaptcha\" data-sitekey=\"%s\"></div>\n",
+         bdata( recaptcha_site_key ) );
+      if( BSTR_ERR == retval ) {
+         dbglog_error( "unable to allocate profile form!\n" );
+         retval = RETVAL_ALLOC;
+         goto cleanup;
+      }
+
+      assert( NULL == page->scripts );
+      page->scripts = bfromcstr(
+         "<script src=\"https://www.google.com/recaptcha/api.js\" "
+            "async defer></script>\n" );
+      if( NULL == page->scripts ) {
+         dbglog_error( "unable to allocate profile form!\n" );
+         retval = RETVAL_ALLOC;
+         goto cleanup;
+      }
+   }
+
+   retval = bcatcstr( page->text,
+      "<div class=\"profile-field profile-button\">"
+         "<input type=\"submit\" name=\"submit\" value=\"Submit\" />"
+      "</div>\n</form>\n</div>\n" );
    if( BSTR_ERR == retval ) {
       dbglog_error( "unable to allocate profile form!\n" );
       retval = RETVAL_ALLOC;
@@ -203,7 +228,7 @@ cleanup:
 }
 
 int cchat_profile_user_cb(
-   bstring page_text, FCGX_Request* req,
+   struct CCHAT_PAGE* page, FCGX_Request* req,
    bstring password_test, int* user_id_out_p,
    int user_id, bstring user_name, bstring email,
    bstring hash, size_t hash_sz, bstring salt, size_t iters, time_t msg_time
@@ -211,6 +236,7 @@ int cchat_profile_user_cb(
    int retval = 0;
    bstring session = NULL;
    bstring req_cookie = NULL;
+   bstring recaptcha_site_key = NULL;
    struct bstrList* c = NULL;
 
    req_cookie = bfromcstr( FCGX_GetParam( "HTTP_COOKIE", req->envp ) );
@@ -219,6 +245,10 @@ int cchat_profile_user_cb(
       retval = RETVAL_PARAMS;
       goto cleanup;
    }
+
+   recaptcha_site_key = bfromcstr(
+      FCGX_GetParam( "CCHAT_RECAPTCHA_SITE", req->envp ) );
+   /* It's fine if this turns out to be NULL. */
 
    c = bsplit( req_cookie, '&' );
    if( NULL == c ) {
@@ -233,9 +263,14 @@ int cchat_profile_user_cb(
       goto cleanup;
    }
 
-   retval = cchat_profile_form( page_text, user_name, email, session );
+   retval = cchat_profile_form(
+      page, user_name, email, session, recaptcha_site_key );
 
 cleanup:
+
+   if( NULL != recaptcha_site_key ) {
+      bdestroy( recaptcha_site_key );
+   }
 
    if( NULL != c ) {
       bstrListDestroy( c );
@@ -258,11 +293,12 @@ int cchat_route_profile(
 ) {
    int retval = 0;
    struct tagbstring page_title = bsStatic( "Profile" );
-   bstring page_text = NULL;
+   struct CCHAT_PAGE page = { 0, 0, 0 };
    struct tagbstring empty_string = bsStatic( "" );
 
-   page_text = bfromcstr( "" );
-   if( NULL == page_text ) {
+   page.title = &page_title;
+   page.text = bfromcstr( "" );
+   if( NULL == page.text ) {
       retval = RETVAL_ALLOC;
       dbglog_error( "could not allocate profile form!\n" );
       goto cleanup;
@@ -271,22 +307,23 @@ int cchat_route_profile(
    if( 0 <= auth_user_id ) {
       /* Edit an existing user. */
       retval = chatdb_iter_users(
-         page_text, db, req, NULL, auth_user_id,
+         &page, db, req, NULL, auth_user_id,
          NULL, NULL, cchat_profile_user_cb, NULL );
       if( retval ) {
          goto cleanup;
       }
    } else {
       retval = cchat_profile_form(
-         page_text, &empty_string, &empty_string, NULL );
+         /* TODO: Add recaptcha. */
+         &page, &empty_string, &empty_string, NULL, NULL );
    }
 
-   retval = cchat_page( req, q, p, &page_title, page_text, 0 );
+   retval = cchat_page( req, q, p, &page, 0 );
 
 cleanup:
 
-   if( NULL != page_text ) {
-      bdestroy( page_text );
+   if( NULL != page.text ) {
+      bdestroy( page.text );
    }
 
    return retval;
@@ -427,6 +464,7 @@ int cchat_route_login(
    struct bstrList* q, struct bstrList* p, struct bstrList* c, sqlite3* db
 ) {
    int retval = 0;
+   struct CCHAT_PAGE page = { 0, 0, 0 };
    struct tagbstring page_title = bsStatic( "Login" );
    struct tagbstring page_text = bsStatic(
       "<div class=\"login-form\">\n"
@@ -443,14 +481,17 @@ int cchat_route_login(
       "</form>\n"
       "</div>\n" );
 
+   page.text = &page_text;
+   page.title = &page_title;
+
    retval = cchat_page(
-      req, q, p, &page_title, &page_text, CCHAT_PAGE_FLAG_NONAV );
+      req, q, p, &page, CCHAT_PAGE_FLAG_NONAV );
 
    return retval;
 }
 
 int cchat_auth_user_cb(
-   bstring page_text, FCGX_Request* req,
+   struct CCHAT_PAGE* page, FCGX_Request* req,
    bstring password_test, int* user_id_out_p,
    int user_id, bstring user_name, bstring email,
    bstring hash, size_t hash_sz, bstring salt, size_t iters, time_t msg_time
@@ -677,7 +718,7 @@ cleanup:
 }
 
 int cchat_print_msg_cb(
-   bstring page_text,
+   struct CCHAT_PAGE* page,
    int msg_id, int msg_type, bstring from, int to, bstring text, time_t msg_time
 ) {
    int retval = 0;
@@ -703,7 +744,7 @@ int cchat_print_msg_cb(
       goto cleanup;
    }
 
-   retval = bconcat( page_text, msg_line );
+   retval = bconcat( page->text, msg_line );
    if( NULL == msg_line ) {
       dbglog_error( "could not add message to page!\n" );
       retval = RETVAL_ALLOC;
@@ -728,10 +769,12 @@ int cchat_route_chat(
    struct bstrList* q, struct bstrList* p, struct bstrList* c, sqlite3* db
 ) {
    int retval = 0;
-   bstring page_text = NULL;
    struct tagbstring page_title = bsStatic( "Chat" );
    bstring err_msg = NULL;
    bstring session = NULL;
+   struct CCHAT_PAGE page = { 0, 0, 0 };
+
+   page.title = &page_title;
 
    if( 0 > auth_user_id ) {
       /* Invalid user; redirect to login. */
@@ -750,22 +793,27 @@ int cchat_route_chat(
       goto cleanup;
    }
 
-   page_text = bfromcstr( "" );
+   page.text = bfromcstr( "" );
+   if( NULL == page.text ) {
+      dbglog_error( "unable to allocate page text!\n" );
+      retval = RETVAL_ALLOC;
+      goto cleanup;
+   }
 
    /* Show messages. */
-   retval = bcatcstr( page_text, "<table class=\"chat-messages\">\n" );
+   retval = bcatcstr( page.text, "<table class=\"chat-messages\">\n" );
    if( BSTR_ERR == retval ) {
       dbglog_error( "error starting table!\n" );
       retval = RETVAL_ALLOC;
       goto cleanup;
    }
    retval = chatdb_iter_messages(
-      page_text, db, 0, 0, cchat_print_msg_cb, &err_msg );
+      &page, db, 0, 0, cchat_print_msg_cb, &err_msg );
    if( retval ) {
       dbglog_error( "error iteraing messages!\n" );
       goto cleanup;
    }
-   retval = bcatcstr( page_text, "</table>\n" );
+   retval = bcatcstr( page.text, "</table>\n" );
    if( BSTR_ERR == retval ) {
       dbglog_error( "error ending table!\n" );
       retval = RETVAL_ALLOC;
@@ -773,7 +821,7 @@ int cchat_route_chat(
    }
 
    if( NULL != err_msg ) {
-      retval = bconcat( page_text, err_msg );
+      retval = bconcat( page.text, err_msg );
       if( BSTR_ERR == retval ) {
          dbglog_error( "error displaying message: %s\n", bdata( err_msg ) );
          retval = RETVAL_ALLOC;
@@ -783,7 +831,7 @@ int cchat_route_chat(
 
    /* Show chat input form. */
    retval = bformata(
-      page_text,
+      page.text,
       "<div class=\"chat-form\">\n"
       "<form action=\"/send\" method=\"post\">\n"
          "<input type=\"text\" id=\"chat\" name=\"chat\" />\n"
@@ -798,7 +846,7 @@ int cchat_route_chat(
       goto cleanup;
    }
 
-   retval = cchat_page( req, q, p, &page_title, page_text, 0 );
+   retval = cchat_page( req, q, p, &page, 0 );
 
 cleanup:
 
@@ -806,8 +854,8 @@ cleanup:
       bdestroy( session );
    }
 
-   if( NULL != page_text ) {
-      bdestroy( page_text );
+   if( NULL != page.text ) {
+      bdestroy( page.text );
    }
 
    if( NULL != err_msg ) {
@@ -897,7 +945,7 @@ cchat_route_cb_t gc_cchat_route_cbs[] = {
 };
 
 int cchat_auth_session_cb(
-   bstring page_text, int* user_id_out_p,
+   struct CCHAT_PAGE* page, int* user_id_out_p,
    int session_id, int user_id,
    bstring hash, size_t hash_sz, bstring remote_host, time_t start_time
 ) {

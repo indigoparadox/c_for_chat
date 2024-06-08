@@ -23,7 +23,7 @@ struct CHATDB_ARG {
    chatdb_iter_msg_cb_t cb_msg;
    chatdb_iter_user_cb_t cb_user;
    chatdb_iter_session_cb_t cb_session;
-   bstring page_text;
+   struct CCHAT_PAGE* page;
    bstring password_test;
    int* user_id_out_p;
    FCGX_Request* req;
@@ -392,7 +392,7 @@ int chatdb_dbcb_messages( void* arg, int argc, char** argv, char **col ) {
    chatdb_argv( msg_text, 4 );
 
    retval = arg_struct->cb_msg(
-      arg_struct->page_text,
+      arg_struct->page,
       atoi( argv[0] ), /* msg_id */
       atoi( argv[1] ), /* msg_type */
       user_name, /* user_from_id */
@@ -414,7 +414,7 @@ cleanup:
 }
 
 int chatdb_iter_messages(
-   bstring page_text, sqlite3* db,
+   struct CCHAT_PAGE* page, sqlite3* db,
    int msg_type, int dest_id, chatdb_iter_msg_cb_t cb, bstring* err_msg_p
 ) {
    int retval = 0;
@@ -422,7 +422,7 @@ int chatdb_iter_messages(
    struct CHATDB_ARG arg_struct;
 
    arg_struct.cb_msg = cb;
-   arg_struct.page_text = page_text;
+   arg_struct.page = page;
 
    retval = sqlite3_exec( db,
       "select m.msg_id, m.msg_type, u.user_name, m.room_or_user_to_id, "
@@ -496,7 +496,7 @@ int chatdb_dbcb_users( void* arg, int argc, char** argv, char **col ) {
    }
 
    retval = arg_struct->cb_user(
-      arg_struct->page_text,
+      arg_struct->page,
       arg_struct->req,
       arg_struct->password_test,
       arg_struct->user_id_out_p,
@@ -531,7 +531,7 @@ cleanup:
 }
 
 int chatdb_iter_users(
-   bstring page_text, sqlite3* db, FCGX_Request* req,
+   struct CCHAT_PAGE* page, sqlite3* db, FCGX_Request* req,
    bstring user_name, int user_id, bstring password_test, int* user_id_out_p,
    chatdb_iter_user_cb_t cb, bstring* err_msg_p
 ) {
@@ -542,7 +542,7 @@ int chatdb_iter_users(
    char* dyn_query = NULL;
 
    arg_struct.cb_user = cb;
-   arg_struct.page_text = page_text;
+   arg_struct.page = page;
    arg_struct.password_test = password_test;
    arg_struct.user_id_out_p = user_id_out_p;
    arg_struct.req = req;
@@ -671,7 +671,7 @@ int chatdb_dbcb_sessions( void* arg, int argc, char** argv, char **col ) {
    chatdb_argv( remote_host, 4 );
 
    retval = arg_struct->cb_session(
-      arg_struct->page_text,
+      arg_struct->page,
       arg_struct->user_id_out_p,
       atoi( argv[0] ), /* session_id */
       atoi( argv[1] ), /* user_id */
@@ -694,7 +694,7 @@ cleanup:
 }
 
 int chatdb_iter_sessions(
-   bstring page_text, int* user_id_out_p, sqlite3* db,
+   struct CCHAT_PAGE* page, int* user_id_out_p, sqlite3* db,
    bstring hash, bstring remote_host,
    chatdb_iter_session_cb_t cb, bstring* err_msg_p
 ) {
@@ -704,7 +704,7 @@ int chatdb_iter_sessions(
    char* query = NULL;
 
    arg_struct.cb_session = cb;
-   arg_struct.page_text = page_text;
+   arg_struct.page = page;
    arg_struct.user_id_out_p = user_id_out_p;
 
    query = sqlite3_mprintf(
@@ -748,7 +748,7 @@ cleanup:
 
 
 int chatdb_remove_session(
-   bstring page_text, sqlite3* db, bstring hash, bstring* err_msg_p
+   struct CCHAT_PAGE* page, sqlite3* db, bstring hash, bstring* err_msg_p
 ) {
    int retval = 0;
    char* err_msg = NULL;
