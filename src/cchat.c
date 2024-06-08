@@ -1189,41 +1189,24 @@ int cchat_handle_req( FCGX_Request* req, sqlite3* db ) {
 
 cleanup:
 
-   if( NULL != session ) {
-      bdestroy( session );
-   }
-
    if( NULL != req_cookie_list ) {
       bstrListDestroy( req_cookie_list );
-   }
-
-   if( NULL != req_cookie ) {
-      bdestroy( req_cookie );
    }
 
    if( NULL != post_buf_list ) {
       bstrListDestroy( post_buf_list );
    }
 
-   if( NULL != post_buf ) {
-      bdestroy( post_buf );
-   }
-
    if( NULL != req_query_list ) {
       bstrListDestroy( req_query_list );
    }
 
-   if( NULL != req_query ) {
-      bdestroy( req_query );
-   }
-
-   if( NULL != req_method ) {
-      bdestroy( req_method );
-   }
-
-   if( NULL != req_uri_raw ) {
-      bdestroy( req_uri_raw );
-   }
+   bcgi_cleanup_bstr( post_buf, bcgi_unlikely );
+   bcgi_cleanup_bstr( session, bcgi_unlikely );
+   bcgi_cleanup_bstr( req_cookie, bcgi_unlikely );
+   bcgi_cleanup_bstr( req_query, bcgi_unlikely );
+   bcgi_cleanup_bstr( req_method, bcgi_unlikely );
+   bcgi_cleanup_bstr( req_uri_raw, bcgi_unlikely );
  
    return retval;
 }

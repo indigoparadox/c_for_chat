@@ -216,4 +216,88 @@ cleanup:
    return retval;
 }
 
+#define BCGI_JSON_PARSE_STATE_STACK_DEPTH    10
+
+#define BCGI_JSON_PARSE_STATE_NONE        0
+#define BCGI_JSON_PARSE_STATE_OBJ         1
+#define BCGI_JSON_PARSE_STATE_OBJ_KEY     2
+#define BCGI_JSON_PARSE_STATE_OBJ_VAL     3
+#define BCGI_JSON_PARSE_STATE_OBJ_VAL_STR 3
+
+#define bcgi_parse_json_push_state( s ) \
+   state[++state_depth] = BCGI_JSON_PARSE_STATE_ ## s
+
+#define bcgi_parse_json_state() \
+   (bcgi_likely( state_depth > 0 ) ? state[state_depth] : 0)
+
+#define bcgi_parse_json_pop_state_expect( s ) \
+   state_depth--; \
+   if( \
+      bcgi_unlikely( 0 <= state_depth ) && \
+      bcgi_unlikely( BCGI_JSON_PARSE_STATE_ ## s != state[state_depth] ) \
+   ) { \
+      dbglog_error( "parse error: expected " #s " but got %d!\n", \
+         state[state_depth] ); \
+      retval = RETVAL_PARAMS; \
+      goto cleanup; \
+   }
+
+int bcgi_parse_json( struct BCGI_JSON_NODE** root_p, bstring buffer ) {
+   size_t i = 0;
+   int retval = 0;
+   char c = 0;
+   bstring token = NULL;
+   int state[BCGI_JSON_PARSE_STATE_STACK_DEPTH] = { 0 };
+   int state_depth = -1; /* Weird type of index to avoid math on inner loop. */
+
+   token = bfromcstr( "" );
+   bcgi_check_null( token );
+
+   for( i = 0 ; blength( buffer ) > i ; i++ ) {
+      c = bchar( buffer, i );
+      
+      switch( c ) {
+      case '{':
+         switch( bcgi_parse_json_state() ) {
+         case BCGI_JSON_PARSE_STATE_NONE:
+            /* Start object. */
+            bcgi_parse_json_push_state( OBJ );
+            break;
+
+         case BCGI_JSON_PARSE_STATE_OBJ_VAL_STR:
+            /* Append literal to string being built. */
+            retval = bconchar( token, c );
+            bcgi_check_bstr_err( token );
+            break;
+         }
+         break;
+
+      case '}':
+         switch( bcgi_parse_json_state() ) {
+         case BCGI_JSON_PARSE_STATE_NONE:
+            /* Start object. */
+            bcgi_parse_json_pop_state_expect( OBJ );
+            break;
+
+         case BCGI_JSON_PARSE_STATE_OBJ_VAL_STR:
+            /* Append literal to string being built. */
+            retval = bconchar( token, c );
+            bcgi_check_bstr_err( token );
+            break;
+         }
+         break;
+
+      default:
+         retval = bconchar( token, c );
+         bcgi_check_bstr_err( token );
+         break;
+      }
+   }
+
+cleanup:
+
+   bcgi_cleanup_bstr( token, bcgi_unlikely );
+
+   return retval;
+}
 
