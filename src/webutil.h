@@ -10,6 +10,9 @@ struct WEBUTIL_PAGE {
    bstring scripts;
 };
 
+int webutil_dump_file(
+   FCGX_Request* req, const char* filename, const char* mimetype );
+
 int webutil_show_page(
    FCGX_Request* req, struct bstrList* q, struct bstrList* p,
    struct WEBUTIL_PAGE* page, uint8_t flags );

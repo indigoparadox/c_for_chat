@@ -3,15 +3,50 @@
 
 #include <curl/curl.h>
 
+int webutil_dump_file(
+   FCGX_Request* req, const char* filename, const char* mimetype
+) {
+   int retval = 0;
+   FILE* fp = NULL;
+   bstring contents = NULL;
+
+   fp = fopen( filename, "rb");
+   if( NULL == fp ) {
+      dbglog_error( "couldn't open file %s!\n", filename );
+      retval = RETVAL_FILE;
+      goto cleanup;
+   }
+
+   contents = bread( (bNread)fread, fp );
+   if( NULL == contents ) {
+      dbglog_error( "couldn't read file %s!\n", filename );
+      retval = RETVAL_FILE;
+      goto cleanup;
+   }
+
+   FCGX_FPrintF( req->out, "Content-type: %s\r\n", mimetype );
+   FCGX_FPrintF( req->out, "Status: 200\r\n\r\n" );
+
+   FCGX_FPrintF( req->out, "%s", bdata( contents ) );
+
+cleanup:
+
+   if( NULL != fp ) {
+      fclose( fp );
+   }
+
+   bcgi_cleanup_bstr( contents, likely );
+
+   return retval;
+}
+
 int webutil_add_script( struct WEBUTIL_PAGE* page, const char* script ) {
    int retval = 0;
 
    assert( script[strlen( script ) - 1] == '\n' );
 
    if( NULL == page->scripts ) {
-      page->scripts = bfromcstr(
-         "<script src=\"https://www.google.com/recaptcha/api.js\" "
-            "async defer></script>\n" );
+      page->scripts = bfromcstr( script );
    } else {
       retval = bcatcstr( page->scripts, script );
       bcgi_check_bstr_err( page->scripts );

@@ -15,7 +15,8 @@ typedef int (*cchat_route_cb_t)(
    f( "/auth", cchat_route_auth, "POST" ) \
    f( "/send", cchat_route_send, "POST" ) \
    f( "/chat", cchat_route_chat, "GET" ) \
-   f( "/style.css", cchat_route_style, "GET" ) \
+   f( "/style.css", cchat_route_style_css, "GET" ) \
+   f( "/chat.js", cchat_route_chat_js, "GET" ) \
    f( "/", cchat_route_root, "GET" ) \
    f( "", NULL, "" )
 
@@ -698,6 +699,7 @@ int cchat_route_chat(
    struct tagbstring page_title = bsStatic( "Chat" );
    bstring err_msg = NULL;
    bstring session = NULL;
+   bstring mini = NULL;
    struct WEBUTIL_PAGE page = { 0, 0, 0 };
 
    page.title = &page_title;
@@ -711,122 +713,93 @@ int cchat_route_chat(
       goto cleanup;
    }
 
-   /* See if a valid session exists (don't urldecode!). */
-   retval = bcgi_query_key( c, "session", &session );
-   if( retval || NULL == session ) {
-      dbglog_error( "unable to determine session cookie hash!\n" );
-      retval = RETVAL_PARAMS;
-      goto cleanup;
-   }
-
    page.text = bfromcstr( "" );
-   if( NULL == page.text ) {
-      dbglog_error( "unable to allocate page text!\n" );
-      retval = RETVAL_ALLOC;
-      goto cleanup;
+   bcgi_check_null( page.text );
+
+   bcgi_query_key( q, "mini", &mini );
+
+   if( NULL == mini || !biseqcaselessStatic( mini, "true" ) ) {
+      /* Open table. */
+      retval = bcatcstr( page.text, "<table class=\"chat-messages\">\n" );
+      bcgi_check_bstr_err( page.text );
+
+      /* Add refresher/convenience script. */
+      retval = webutil_add_script( &page,
+         "<script src=\"https://code.jquery.com/jquery-2.2.4.min.js\" integrity=\"sha256-BbhdlvQf/xTY9gja0Dq3HiwQF8LaCRTXxZKRutelT44=\" crossorigin=\"anonymous\"></script>\n" );
+      retval = webutil_add_script( &page,
+         "<script type=\"text/javascript\" src=\"chat.js\"></script>\n" );
    }
 
-   /* Show messages. */
-   retval = bcatcstr( page.text, "<table class=\"chat-messages\">\n" );
-   if( BSTR_ERR == retval ) {
-      dbglog_error( "error starting table!\n" );
-      retval = RETVAL_ALLOC;
-      goto cleanup;
-   }
    retval = chatdb_iter_messages(
       &page, db, 0, 0, cchat_print_msg_cb, &err_msg );
    if( retval ) {
       dbglog_error( "error iteraing messages!\n" );
       goto cleanup;
    }
-   retval = bcatcstr( page.text, "</table>\n" );
-   if( BSTR_ERR == retval ) {
-      dbglog_error( "error ending table!\n" );
-      retval = RETVAL_ALLOC;
-      goto cleanup;
-   }
 
-   if( NULL != err_msg ) {
-      retval = bconcat( page.text, err_msg );
-      if( BSTR_ERR == retval ) {
-         dbglog_error( "error displaying message: %s\n", bdata( err_msg ) );
-         retval = RETVAL_ALLOC;
+   if( NULL == mini || !biseqcaselessStatic( mini, "true" ) ) {
+      /* Close table and show form. */
+
+      retval = bcatcstr( page.text, "</table>\n" );
+      bcgi_check_bstr_err( page.text );
+
+      /* See if a valid session exists (don't urldecode!). */
+      retval = bcgi_query_key( c, "session", &session );
+      if( retval || NULL == session ) {
+         dbglog_error( "unable to determine session cookie hash!\n" );
+         retval = RETVAL_PARAMS;
          goto cleanup;
       }
-   }
 
-   /* Show chat input form. */
-   retval = bformata(
-      page.text,
-      "<div class=\"chat-form\">\n"
-      "<form action=\"/send\" method=\"post\">\n"
-         "<input type=\"text\" id=\"chat\" name=\"chat\" />\n"
-         "<input type=\"submit\" name=\"submit\" value=\"Send\" />\n"
-         "<input type=\"hidden\" name=\"csrf\" value=\"%s\" />\n"
-      "</form>\n"
-      "</div>\n",
-      bdata( session ) );
-   if( BSTR_ERR == retval ) {
-      dbglog_error( "error adding form!\n" );
-      retval = RETVAL_ALLOC;
-      goto cleanup;
-   }
+      /* Show chat input form. */
+      retval = bformata(
+         page.text,
+         "<div class=\"chat-form\">\n"
+         "<form action=\"/send\" method=\"post\">\n"
+            "<input type=\"text\" id=\"chat\" name=\"chat\" />\n"
+            "<input type=\"submit\" name=\"submit\" value=\"Send\" />\n"
+            "<input type=\"hidden\" name=\"csrf\" value=\"%s\" />\n"
+         "</form>\n"
+         "</div>\n",
+         bdata( session ) );
+      bcgi_check_bstr_err( page.text );
 
-   retval = webutil_show_page( req, q, p, &page, 0 );
+      retval = webutil_show_page( req, q, p, &page, 0 );
+   } else {
+      FCGX_FPrintF( req->out, "Content-type: text/html\r\n" );
+      FCGX_FPrintF( req->out, "Status: 200\r\n\r\n" );
+
+      FCGX_FPrintF( req->out, "%s", bdata( page.text ) );
+   }
 
 cleanup:
 
-   if( NULL != session ) {
-      bdestroy( session );
-   }
-
-   if( NULL != page.text ) {
-      bdestroy( page.text );
-   }
-
-   if( NULL != err_msg ) {
-      bdestroy( err_msg );
-   }
+   bcgi_cleanup_bstr( mini, likely );
+   bcgi_cleanup_bstr( session, likely );
+   bcgi_cleanup_bstr( page.text, likely );
+   bcgi_cleanup_bstr( err_msg, unlikely );
 
    return retval;
 }
 
-int cchat_route_style(
+int cchat_route_style_css(
    FCGX_Request* req, int auth_user_id,
    struct bstrList* q, struct bstrList* p, struct bstrList* c, sqlite3* db
 ) {
-   FILE* fp = NULL;
    int retval = 0;
-   bstring contents = NULL;
 
-   fp = fopen( "style.css", "rb");
-   if( NULL == fp ) {
-      dbglog_error( "couldn't open style.css!\n" );
-      retval = RETVAL_FILE;
-      goto cleanup;
-   }
+   retval = webutil_dump_file( req, "style.css", "text/css" );
 
-   contents = bread( (bNread)fread, fp );
-   if( NULL == contents ) {
-      dbglog_error( "couldn't read style.css!\n" );
-      retval = RETVAL_FILE;
-      goto cleanup;
-   }
+   return retval;
+}
 
-   FCGX_FPrintF( req->out, "Content-type: text/html\r\n" );
-   FCGX_FPrintF( req->out, "Status: 200\r\n\r\n" );
+int cchat_route_chat_js(
+   FCGX_Request* req, int auth_user_id,
+   struct bstrList* q, struct bstrList* p, struct bstrList* c, sqlite3* db
+) {
+   int retval = 0;
 
-   FCGX_FPrintF( req->out, "%s", bdata( contents ) );
-
-cleanup:
-
-   if( NULL != contents ) {
-      bdestroy( contents );
-   }
-
-   if( NULL != fp ) {
-      fclose( fp );
-   }
+   retval = webutil_dump_file( req, "chat.js", "text/javascript" );
 
    return retval;
 }
