@@ -6,7 +6,9 @@
 
 void dbglog_shutdown(); */
 
-#define _dbglog_fmt( lvl, file, line ) "(" #lvl ") " file ": " #line ": "
+#define _ds( s ) #s
+
+#define _dbglog_fmt( lvl, file, line ) "(" #lvl ") " file ": " _ds( line ) ": "
 
 #define dbglog_debug( lvl, ... ) \
    assert( NULL != g_dbglog_file ); \

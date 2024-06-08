@@ -461,9 +461,6 @@ int chatdb_dbcb_users( void* arg, int argc, char** argv, char **col ) {
    bstring hash = NULL;
    bstring salt = NULL;
 
-   /* XXX */
-   dbglog_debug( 1, "argc: %d\n", argc );
-
    if( 7 > argc ) {
       dbglog_error( "incorrect number of user fields!\n" );
       retval = 1;
@@ -573,9 +570,6 @@ int chatdb_iter_users(
       retval = RETVAL_ALLOC;
       goto cleanup;
    }
-
-   /* XXX */
-   dbglog_debug( 1, "%s\n", query );
 
    retval = sqlite3_exec( db, query, chatdb_dbcb_users, &arg_struct, &err_msg );
    if( SQLITE_OK != retval ) {

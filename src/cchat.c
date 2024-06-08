@@ -25,7 +25,7 @@ typedef int (*cchat_route_cb_t)(
 #define cchat_decode_field( list, field_name ) \
    retval = bcgi_query_key( list, #field_name, &field_name ); \
    if( retval || NULL == field_name ) { \
-      /* err_msg = bfromcstr( "Invalid " #field_name "!" ); */ \
+      err_msg = bfromcstr( "Invalid " #field_name "!" ); \
       dbglog_error( "no " #field_name " found!\n" ); \
       retval = RETVAL_PARAMS; \
       goto cleanup; \
@@ -213,8 +213,6 @@ int cchat_profile_user_cb(
    bstring req_cookie = NULL;
    struct bstrList* c = NULL;
 
-   dbglog_debug( 1, "zzz\n" );
-
    req_cookie = bfromcstr( FCGX_GetParam( "HTTP_COOKIE", req->envp ) );
    if( NULL == req_cookie ) {
       dbglog_error( "no cookie provided to user validator!\n" );
@@ -222,16 +220,12 @@ int cchat_profile_user_cb(
       goto cleanup;
    }
 
-   dbglog_debug( 1, "yyy\n" );
-
    c = bsplit( req_cookie, '&' );
    if( NULL == c ) {
       dbglog_error( "could not allocate cookie list!\n" );
       retval = RETVAL_ALLOC;
       goto cleanup;
    }
-
-   dbglog_debug( 1, "xxx\n" );
 
    /* See if a valid session exists (don't urldecode!). */
    retval = bcgi_query_key( c, "session", &session );
@@ -282,8 +276,6 @@ int cchat_route_profile(
       if( retval ) {
          goto cleanup;
       }
-      /* XXX */
-      dbglog_debug( 1, "%s\n", bdata( page_text ) );
    } else {
       retval = cchat_profile_form(
          page_text, &empty_string, &empty_string, NULL );
@@ -314,12 +306,36 @@ int cchat_route_user(
    bstring email = NULL;
    bstring email_decode = NULL;
    bstring err_msg = NULL;
+   bstring session = NULL;
+   bstring csrf = NULL;
+   bstring csrf_decode = NULL;
 
    dbglog_debug( 1, "route: user\n" );
 
    if( NULL == p ) {
       err_msg = bfromcstr( "Invalid message format!" );
       goto cleanup;
+   }
+
+   if( 0 <= auth_user_id ) {
+      /* See if a valid session exists (don't urldecode!). */
+      retval = bcgi_query_key( c, "session", &session );
+      if( retval || NULL == session ) {
+         dbglog_error( "unable to determine session cookie hash!\n" );
+         retval = RETVAL_PARAMS;
+         goto cleanup;
+      }
+
+      cchat_decode_field( p, csrf );
+
+      /* Validate CSRF token. */
+      if( 0 != bstrcmp( csrf_decode, session ) ) {
+         dbglog_error( "invalid csrf!\n" );
+         assert( NULL == err_msg );
+         err_msg = bfromcstr( "Invalid CSRF token!" );
+         retval = RETVAL_PARAMS;
+         goto cleanup;
+      }
    }
 
    /* There is POST data, so try to decode it. */
@@ -353,6 +369,18 @@ cleanup:
    }
    FCGX_FPrintF( req->out, "Cache-Control: no-cache\r\n" );
    FCGX_FPrintF( req->out, "\r\n" ); 
+
+   if( NULL != csrf ) {
+      bdestroy( csrf );
+   }
+
+   if( NULL != csrf_decode ) {
+      bdestroy( csrf_decode );
+   }
+
+   if( NULL != session ) {
+      bdestroy( session );
+   }
 
    if( NULL != email_decode ) {
       bdestroy( email_decode );
@@ -570,11 +598,33 @@ int cchat_route_send(
    bstring chat = NULL;
    bstring chat_decode = NULL;
    bstring err_msg = NULL;
+   bstring session = NULL;
+   bstring csrf = NULL;
+   bstring csrf_decode = NULL;
 
    dbglog_debug( 1, "route: send\n" );
 
    if( NULL == p ) {
       err_msg = bfromcstr( "Invalid message format!" );
+      goto cleanup;
+   }
+
+   /* See if a valid session exists (don't urldecode!). */
+   retval = bcgi_query_key( c, "session", &session );
+   if( retval || NULL == session ) {
+      dbglog_error( "unable to determine session cookie hash!\n" );
+      retval = RETVAL_PARAMS;
+      goto cleanup;
+   }
+
+   cchat_decode_field( p, csrf );
+
+   /* Validate CSRF token. */
+   if( 0 != bstrcmp( csrf_decode, session ) ) {
+      dbglog_error( "invalid csrf!\n" );
+      assert( NULL == err_msg );
+      err_msg = bfromcstr( "Invalid CSRF token!" );
+      retval = RETVAL_PARAMS;
       goto cleanup;
    }
 
@@ -598,6 +648,18 @@ cleanup:
    }
    FCGX_FPrintF( req->out, "Cache-Control: no-cache\r\n" );
    FCGX_FPrintF( req->out, "\r\n" );
+
+   if( NULL != csrf ) {
+      bdestroy( csrf );
+   }
+
+   if( NULL != csrf_decode ) {
+      bdestroy( csrf_decode );
+   }
+
+   if( NULL != session ) {
+      bdestroy( session );
+   }
 
    if( NULL != chat_decode ) {
       bdestroy( chat_decode );
