@@ -108,6 +108,7 @@ static int cchat_profile_form(
    }
 
    if( NULL != bdata( recaptcha_site_key ) ) {
+      /* Add recaptcha if key present. */
       retval = bformata( page->text,
          "<div class=\"g-recaptcha\" data-sitekey=\"%s\"></div>\n",
          bdata( recaptcha_site_key ) );
@@ -117,13 +118,10 @@ static int cchat_profile_form(
          goto cleanup;
       }
 
-      assert( NULL == page->scripts );
-      page->scripts = bfromcstr(
+      retval = webutil_add_script( page,
          "<script src=\"https://www.google.com/recaptcha/api.js\" "
             "async defer></script>\n" );
-      if( NULL == page->scripts ) {
-         dbglog_error( "unable to allocate profile form!\n" );
-         retval = RETVAL_ALLOC;
+      if( retval ) {
          goto cleanup;
       }
    }
@@ -386,6 +384,7 @@ int cchat_route_login(
    bcgi_check_null( page.text );
 
    if( NULL != bdata( recaptcha_site_key ) ) {
+      /* Add recaptcha if key present. */
       retval = bformata( page.text,
          "<div class=\"g-recaptcha\" data-sitekey=\"%s\"></div>\n",
          bdata( recaptcha_site_key ) );
@@ -395,11 +394,12 @@ int cchat_route_login(
          goto cleanup;
       }
 
-      assert( NULL == page.scripts );
-      page.scripts = bfromcstr(
+      retval = webutil_add_script( &page,
          "<script src=\"https://www.google.com/recaptcha/api.js\" "
             "async defer></script>\n" );
-      bcgi_check_null( page.scripts );
+      if( retval ) {
+         goto cleanup;
+      }
    }
 
    retval = bcatcstr( page.text,
