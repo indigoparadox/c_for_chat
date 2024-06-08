@@ -62,15 +62,14 @@ body {
 
 .chat-from {
    font-weight: bold;
-   width: 10%;
+   width: 200px;
 }
 
 .chat-time {
-   width: 10%;
+   width: 200px;
 }
 
 .chat-msg {
-   width: 80%;
 }
 
 .chat-form {

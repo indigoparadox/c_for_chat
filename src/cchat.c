@@ -652,7 +652,7 @@ int cchat_print_msg_cb(
 ) {
    int retval = 0;
    bstring text_escaped = NULL;
-   bstring msg_line = NULL;
+   bstring msg_time_f = NULL;
 
    /* Sanitize HTML. */
    retval = bcgi_html_escape( text, &text_escaped );
@@ -660,35 +660,25 @@ int cchat_print_msg_cb(
       goto cleanup;
    }
 
-   msg_line = bformat(
+   retval = webutil_format_time( &msg_time_f, msg_time );
+   if( retval ) {
+      goto cleanup;
+   }
+
+   retval = bformata(
+      page->text,
       "<tr>"
          "<td class=\"chat-from\">%s</td>"
          "<td class=\"chat-msg\">%s</td>"
-         "<td class=\"chat-time\">%d</td>"
+         "<td class=\"chat-time\">%s</td>"
       "</tr>\n",
-      bdata( from ), bdata( text_escaped ), msg_time );
-   if( NULL == msg_line ) {
-      dbglog_error( "could not allocate msg line!\n" );
-      retval = RETVAL_ALLOC;
-      goto cleanup;
-   }
-
-   retval = bconcat( page->text, msg_line );
-   if( NULL == msg_line ) {
-      dbglog_error( "could not add message to page!\n" );
-      retval = RETVAL_ALLOC;
-      goto cleanup;
-   }
+      bdata( from ), bdata( text_escaped ), bdata( msg_time_f ) );
+   bcgi_check_bstr_err( page->text );
 
 cleanup:
 
-   if( NULL != msg_line ) {
-      bdestroy( msg_line );
-   }
-
-   if( NULL != text_escaped ) {
-      bdestroy( text_escaped );
-   }
+   bcgi_cleanup_bstr( text_escaped, likely );
+   bcgi_cleanup_bstr( msg_time_f, likely );
 
    return retval;
 }

@@ -3,6 +3,23 @@
 
 #include <curl/curl.h>
 
+int webutil_format_time( bstring* out_p, time_t epoch ) {
+   int retval = 0;
+   struct tm* ts = NULL;
+
+   assert( NULL == *out_p );
+
+   *out_p = bfromcstralloc( 101, "" );
+   bcgi_check_null( *out_p );
+
+   ts = localtime( &epoch );
+   strftime( (char*)((*out_p)->data), 100, "%Y-%m-%d %H:%M %Z", ts );
+
+cleanup:
+
+   return retval;
+}
+
 int webutil_dump_file(
    FCGX_Request* req, const char* filename, const char* mimetype
 ) {

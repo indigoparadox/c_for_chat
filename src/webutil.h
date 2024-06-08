@@ -15,6 +15,8 @@ struct WEBUTIL_PAGE {
    bstring scripts;
 };
 
+int webutil_format_time( bstring* out_p, time_t epoch );
+
 int webutil_dump_file(
    FCGX_Request* req, const char* filename, const char* mimetype );
 
