@@ -142,8 +142,8 @@ int cchat_route_logout(
    return retval;
 }
 
-int cchar_profile_form(
-   bstring page_text, bstring user_name, bstring email
+int cchat_profile_form(
+   bstring page_text, bstring user_name, bstring email, bstring session
 ) {
    int retval = 0;
 
@@ -168,28 +168,92 @@ int cchar_profile_form(
             "<input type=\"password\" id=\"password2\" name=\"password2\" />"
                "</div>\n"
          "<div class=\"profile-field profile-button\">"
-            "<input type=\"submit\" name=\"submit\" value=\"Submit\" /></div>\n"
-      "</form>\n"
-      "</div>\n",
+            "<input type=\"submit\" name=\"submit\" value=\"Submit\" />"
+         "</div>\n",
       bdata( user_name ), bdata( email )
    );
 
    if( BSTR_ERR == retval ) {
       dbglog_error( "unable to allocate profile form!\n" );
       retval = RETVAL_ALLOC;
+      goto cleanup;
+   }
+
+   if( NULL != session ) {
+      retval = bformata( page_text,
+         "<input type=\"hidden\" name=\"csrf\" value=\"%s\" />\n",
+         bdata( session ) );
+      if( BSTR_ERR == retval ) {
+         dbglog_error( "unable to allocate profile form!\n" );
+         retval = RETVAL_ALLOC;
+         goto cleanup;
+      }
+   }
+
+   retval = bcatcstr( page_text, "</form>\n</div>\n" );
+   if( BSTR_ERR == retval ) {
+      dbglog_error( "unable to allocate profile form!\n" );
+      retval = RETVAL_ALLOC;
+      goto cleanup;
    }
  
+cleanup:
+
    return retval;
 }
 
 int cchat_profile_user_cb(
-   bstring page_text, bstring password_test, int* user_id_out_p,
+   bstring page_text, FCGX_Request* req,
+   bstring password_test, int* user_id_out_p,
    int user_id, bstring user_name, bstring email,
    bstring hash, size_t hash_sz, bstring salt, size_t iters, time_t msg_time
 ) {
    int retval = 0;
+   bstring session = NULL;
+   bstring req_cookie = NULL;
+   struct bstrList* c = NULL;
 
-   retval = cchar_profile_form( page_text, user_name, email );
+   dbglog_debug( 1, "zzz\n" );
+
+   req_cookie = bfromcstr( FCGX_GetParam( "HTTP_COOKIE", req->envp ) );
+   if( NULL == req_cookie ) {
+      dbglog_error( "no cookie provided to user validator!\n" );
+      retval = RETVAL_PARAMS;
+      goto cleanup;
+   }
+
+   dbglog_debug( 1, "yyy\n" );
+
+   c = bsplit( req_cookie, '&' );
+   if( NULL == c ) {
+      dbglog_error( "could not allocate cookie list!\n" );
+      retval = RETVAL_ALLOC;
+      goto cleanup;
+   }
+
+   dbglog_debug( 1, "xxx\n" );
+
+   /* See if a valid session exists (don't urldecode!). */
+   retval = bcgi_query_key( c, "session", &session );
+   if( retval ) {
+      goto cleanup;
+   }
+
+   retval = cchat_profile_form( page_text, user_name, email, session );
+
+cleanup:
+
+   if( NULL != c ) {
+      bstrListDestroy( c );
+   }
+
+   if( NULL != req_cookie ) {
+      bdestroy( req_cookie );
+   }
+
+   if( NULL != session ) {
+      bdestroy( session );
+   }
 
    return retval;
 }
@@ -213,13 +277,16 @@ int cchat_route_profile(
    if( 0 <= auth_user_id ) {
       /* Edit an existing user. */
       retval = chatdb_iter_users(
-         page_text, db, NULL, auth_user_id,
+         page_text, db, req, NULL, auth_user_id,
          NULL, NULL, cchat_profile_user_cb, NULL );
       if( retval ) {
          goto cleanup;
       }
+      /* XXX */
+      dbglog_debug( 1, "%s\n", bdata( page_text ) );
    } else {
-      retval = cchar_profile_form( page_text, &empty_string, &empty_string );
+      retval = cchat_profile_form(
+         page_text, &empty_string, &empty_string, NULL );
    }
 
    retval = cchat_page( req, q, p, &page_title, page_text, 0 );
@@ -355,7 +422,8 @@ int cchat_route_login(
 }
 
 int cchat_auth_user_cb(
-   bstring page_text, bstring password_test, int* user_id_out_p,
+   bstring page_text, FCGX_Request* req,
+   bstring password_test, int* user_id_out_p,
    int user_id, bstring user_name, bstring email,
    bstring hash, size_t hash_sz, bstring salt, size_t iters, time_t msg_time
 ) {
@@ -376,6 +444,8 @@ int cchat_auth_user_cb(
       retval = RETVAL_AUTH;
       goto cleanup;
    }
+
+   assert( 0 != user_id );
 
    /* Return this user as their password matches. */
    *user_id_out_p = user_id;
@@ -401,7 +471,7 @@ int cchat_route_auth(
    bstring err_msg = NULL;
    bstring hash = NULL;
    bstring remote_host = NULL;
-   int user_id = 0;
+   int user_id = -1;
 
    dbglog_debug( 1, "route: auth\n" );
 
@@ -416,11 +486,22 @@ int cchat_route_auth(
 
    /* Validate username and password. */
    retval = chatdb_iter_users(
-      NULL, db, user_decode, -1, password_decode, &user_id,
+      NULL, db, req, user_decode, -1, password_decode, &user_id,
       cchat_auth_user_cb, &err_msg );
-   if( retval ) {
-      assert( NULL != err_msg );
-      bassigncstr( err_msg, "Invalid username or password!" );
+   if( retval || 0 > user_id ) {
+      if( NULL != err_msg ) {
+         retval = bassigncstr( err_msg, "Invalid username or password!" );
+         if( BSTR_OK != retval ) {
+            dbglog_error( "unable to allocate error message!\n" );
+            retval = RETVAL_ALLOC;
+         }
+      } else {
+         err_msg = bfromcstr( "Invalid username or password!" );
+         if( NULL == err_msg ) {
+            dbglog_error( "unable to allocate error message!\n" );
+            retval = RETVAL_ALLOC;
+         }
+      }
       goto cleanup;
    }
 
@@ -588,6 +669,7 @@ int cchat_route_chat(
    bstring page_text = NULL;
    struct tagbstring page_title = bsStatic( "Chat" );
    bstring err_msg = NULL;
+   bstring session = NULL;
 
    if( 0 > auth_user_id ) {
       /* Invalid user; redirect to login. */
@@ -595,6 +677,14 @@ int cchat_route_chat(
       FCGX_FPrintF( req->out, "Location: /login\r\n" );
       FCGX_FPrintF( req->out, "Cache-Control: no-cache\r\n" );
       FCGX_FPrintF( req->out, "\r\n" );
+      goto cleanup;
+   }
+
+   /* See if a valid session exists (don't urldecode!). */
+   retval = bcgi_query_key( c, "session", &session );
+   if( retval || NULL == session ) {
+      dbglog_error( "unable to determine session cookie hash!\n" );
+      retval = RETVAL_PARAMS;
       goto cleanup;
    }
 
@@ -630,25 +720,29 @@ int cchat_route_chat(
    }
 
    /* Show chat input form. */
-   retval = bcatcstr(
+   retval = bformata(
       page_text,
       "<div class=\"chat-form\">\n"
       "<form action=\"/send\" method=\"post\">\n"
          "<input type=\"text\" id=\"chat\" name=\"chat\" />\n"
          "<input type=\"submit\" name=\"submit\" value=\"Send\" />\n"
+         "<input type=\"hidden\" name=\"csrf\" value=\"%s\" />\n"
       "</form>\n"
-      "</div>\n" );
+      "</div>\n",
+      bdata( session ) );
    if( BSTR_ERR == retval ) {
       dbglog_error( "error adding form!\n" );
       retval = RETVAL_ALLOC;
       goto cleanup;
    }
 
-   dbglog_error( "%s\n", bdata( page_text ) );
-
    retval = cchat_page( req, q, p, &page_title, page_text, 0 );
 
 cleanup:
+
+   if( NULL != session ) {
+      bdestroy( session );
+   }
 
    if( NULL != page_text ) {
       bdestroy( page_text );

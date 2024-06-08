@@ -26,6 +26,7 @@ struct CHATDB_ARG {
    bstring page_text;
    bstring password_test;
    int* user_id_out_p;
+   FCGX_Request* req;
 };
 
 int chatdb_init( bstring path, sqlite3** db_p ) {
@@ -460,6 +461,9 @@ int chatdb_dbcb_users( void* arg, int argc, char** argv, char **col ) {
    bstring hash = NULL;
    bstring salt = NULL;
 
+   /* XXX */
+   dbglog_debug( 1, "argc: %d\n", argc );
+
    if( 7 > argc ) {
       dbglog_error( "incorrect number of user fields!\n" );
       retval = 1;
@@ -496,6 +500,7 @@ int chatdb_dbcb_users( void* arg, int argc, char** argv, char **col ) {
 
    retval = arg_struct->cb_user(
       arg_struct->page_text,
+      arg_struct->req,
       arg_struct->password_test,
       arg_struct->user_id_out_p,
       atoi( argv[0] ), /* user_id */
@@ -529,7 +534,7 @@ cleanup:
 }
 
 int chatdb_iter_users(
-   bstring page_text, sqlite3* db,
+   bstring page_text, sqlite3* db, FCGX_Request* req,
    bstring user_name, int user_id, bstring password_test, int* user_id_out_p,
    chatdb_iter_user_cb_t cb, bstring* err_msg_p
 ) {
@@ -543,8 +548,10 @@ int chatdb_iter_users(
    arg_struct.page_text = page_text;
    arg_struct.password_test = password_test;
    arg_struct.user_id_out_p = user_id_out_p;
+   arg_struct.req = req;
 
    if( NULL != user_name ) {
+      assert( 0 > user_id );
       dyn_query = sqlite3_mprintf(
          "select user_id, user_name, email, hash, hash_sz, salt, iters, "
             "strftime('%%s', join_time) from users where user_name = '%q'",
@@ -553,7 +560,7 @@ int chatdb_iter_users(
    } else if( 0 <= user_id ) {
       dyn_query = sqlite3_mprintf(
          "select user_id, user_name, email, hash, hash_sz, salt, iters, "
-            "strftime('%%s', join_time) from users where user_id = '%d'",
+            "strftime('%%s', join_time) from users where user_id = %d",
          user_id );
       query = dyn_query;
    } else {
@@ -567,9 +574,12 @@ int chatdb_iter_users(
       goto cleanup;
    }
 
+   /* XXX */
+   dbglog_debug( 1, "%s\n", query );
+
    retval = sqlite3_exec( db, query, chatdb_dbcb_users, &arg_struct, &err_msg );
    if( SQLITE_OK != retval ) {
-      /* TODO: Return err_msg. */
+      /* Return err_msg. */
       dbglog_error(
          "could not execute database user query: %s\n", err_msg );
       if( NULL != err_msg_p ) {
@@ -631,7 +641,7 @@ int chatdb_add_session(
    query = sqlite3_mprintf(
       "insert into sessions "
       "(user_id, hash, hash_sz, remote_host) "
-      "values('%d', '%q', '%d', '%q')",
+      "values(%d, '%q', %d, '%q')",
       user_id, bdata( *hash_p ), CHATDB_SESSION_HASH_SZ, bdata( remote_host ) );
    if( NULL == query ) {
       dbglog_error( "could not allocate database session insert!\n" );
