@@ -7,15 +7,27 @@ PKG_CFG_DEPS := sqlite3 libcurl openssl libcrypto
 
 CFLAGS_DEBUG := -DDEBUG -Wall -g -fsanitize=undefined -fsanitize=leak -fsanitize=address
 
-INCLUDES := $(shell pkg-config $(PKG_CFG_DEPS) --cflags)
+INCLUDES := $(shell pkg-config $(PKG_CFG_DEPS) --cflags) -I/usr/local/include
 
 LDFLAGS_DEBUG := -g -fsanitize=undefined -fsanitize=leak -fsanitize=address
 
 LIBS := $(shell pkg-config $(PKG_CFG_DEPS) --libs) -lfcgi
 
+LIBS_STATIC_DEPS_COMMON := -lz -ldl -lpthread -lpsl -lnghttp2 -lidn2 -lunistring
+
+LIBS_STATIC_DEPS_FREEBSD := -lm $(LIBS_STATIC_DEPS_COMMON)
+
+LIBS_STATIC_DEPS_ALPINE := $(LIBS_STATIC_DEPS_COMMON) -lzstd -lcares -lbrotlidec -lbrotlicommon -static-libgcc
+
+ifeq ("$(shell uname -o)", "FreeBSD")
+LIBS_STATIC_DEPS := $(LIBS_STATIC_DEPS_FREEBSD)
+else
+LIBS_STATIC_DEPS := $(LIBS_STATIC_DEPS_ALPINE)
+endif
+
 ifeq ("$(BUILD)", "STATIC")
 CFLAGS := $(INCLUDES)
-LDFLAGS := -static $(LIBS) -lz -ldl -lpthread -lpsl -lnghttp2 -lidn2 -lzstd -lcares -lunistring -lbrotlidec -lbrotlicommon -static-libgcc
+LDFLAGS := -static $(LIBS) $(LIBS_STATIC_DEPS)
 else
 ifeq ("$(BUILD)", "DEBUG")
 CFLAGS := $(CFLAGS_DEBUG) $(INCLUDES)
