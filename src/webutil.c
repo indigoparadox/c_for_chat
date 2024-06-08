@@ -61,7 +61,7 @@ cleanup:
 
 int webutil_show_page(
    FCGX_Request* req, struct bstrList* q, struct bstrList* p,
-   struct WEBUTIL_PAGE* page, uint8_t flags
+   struct WEBUTIL_PAGE* page
 ) {
    int retval = 0;
    size_t i = 0;
@@ -79,14 +79,23 @@ int webutil_show_page(
       FCGX_FPrintF( req->out, "%s", bdata( page->scripts ) );
    }
    FCGX_FPrintF( req->out, "</head>\n" );
-   FCGX_FPrintF( req->out, "<body>\n" );
-   FCGX_FPrintF( req->out, "<h1 class=\"page-title\">%s</h1>\n",
-      bdata( page->title ) );
-   if( WEBUTIL_PAGE_FLAG_NONAV != (WEBUTIL_PAGE_FLAG_NONAV & flags) ) {
+   if( WEBUTIL_PAGE_FLAG_NOBODY != (WEBUTIL_PAGE_FLAG_NOBODY & page->flags) ) {
+      FCGX_FPrintF( req->out, "<body>\n" );
+   }
+   if(
+      WEBUTIL_PAGE_FLAG_NOTITLE != (WEBUTIL_PAGE_FLAG_NOTITLE & page->flags)
+   ) {
+      FCGX_FPrintF( req->out, "<h1 class=\"page-title\">%s</h1>\n",
+         bdata( page->title ) );
+   }
+   if( WEBUTIL_PAGE_FLAG_NONAV != (WEBUTIL_PAGE_FLAG_NONAV & page->flags) ) {
       FCGX_FPrintF( req->out, "<ul class=\"page-nav\">\n" );
-      FCGX_FPrintF( req->out, "<li><a href=\"/chat\">Chat</a>\n" );
-      FCGX_FPrintF( req->out, "<li><a href=\"/profile\">Profile</a>\n" );
-      FCGX_FPrintF( req->out, "<li><a href=\"/logout\">Logout</a>\n" );
+      FCGX_FPrintF( req->out,
+         "<li><a target=\"_top\" href=\"/chat\">Chat</a>\n" );
+      FCGX_FPrintF( req->out,
+         "<li><a target=\"_top\" href=\"/profile\">Profile</a>\n" );
+      FCGX_FPrintF( req->out,
+         "<li><a target=\"_top\" href=\"/logout\">Logout</a>\n" );
       FCGX_FPrintF( req->out, "</ul>\n" );
    }
 
@@ -136,7 +145,9 @@ cleanup:
    }
 
    /* Close page. */
-   FCGX_FPrintF( req->out, "</body>\n" );
+   if( WEBUTIL_PAGE_FLAG_NOBODY != (WEBUTIL_PAGE_FLAG_NOBODY & page->flags) ) {
+      FCGX_FPrintF( req->out, "</body>\n" );
+   }
    FCGX_FPrintF( req->out, "</html>\n" );
 
    return retval;

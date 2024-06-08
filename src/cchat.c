@@ -212,6 +212,7 @@ int cchat_route_profile(
    struct tagbstring empty_string = bsStatic( "" );
 
    page.title = &page_title;
+   page.flags = 0;
    page.text = bfromcstr( "" );
    if( NULL == page.text ) {
       retval = RETVAL_ALLOC;
@@ -233,7 +234,7 @@ int cchat_route_profile(
          &page, &empty_string, &empty_string, NULL, NULL );
    }
 
-   retval = webutil_show_page( req, q, p, &page, 0 );
+   retval = webutil_show_page( req, q, p, &page );
 
 cleanup:
 
@@ -410,8 +411,9 @@ int cchat_route_login(
    bcgi_check_bstr_err( page.text );
 
    page.title = &page_title;
+   page.flags = WEBUTIL_PAGE_FLAG_NONAV;
 
-   retval = webutil_show_page( req, q, p, &page, WEBUTIL_PAGE_FLAG_NONAV );
+   retval = webutil_show_page( req, q, p, &page );
 
 cleanup:
 
@@ -612,7 +614,7 @@ cleanup:
       FCGX_FPrintF(
          req->out, "Location: /chat?error=%s\r\n", bdata( err_msg ) );
    } else {
-      FCGX_FPrintF( req->out, "Location: /chat\r\n" );
+      FCGX_FPrintF( req->out, "Location: /chat?mini=bottom\r\n" );
    }
    FCGX_FPrintF( req->out, "Cache-Control: no-cache\r\n" );
    FCGX_FPrintF( req->out, "\r\n" );
@@ -703,6 +705,7 @@ int cchat_route_chat(
    struct WEBUTIL_PAGE page = { 0, 0, 0 };
 
    page.title = &page_title;
+   page.flags = 0;
 
    if( 0 > auth_user_id ) {
       /* Invalid user; redirect to login. */
@@ -718,30 +721,57 @@ int cchat_route_chat(
 
    bcgi_query_key( q, "mini", &mini );
 
-   if( NULL == mini || !biseqcaselessStatic( mini, "true" ) ) {
-      /* Open table. */
+#if 0
+   /* Add refresher/convenience script. */
+   retval = webutil_add_script( &page,
+      "<script src=\"https://code.jquery.com/jquery-2.2.4.min.js\" integrity=\"sha256-BbhdlvQf/xTY9gja0Dq3HiwQF8LaCRTXxZKRutelT44=\" crossorigin=\"anonymous\"></script>\n" );
+   retval = webutil_add_script( &page,
+      "<script type=\"text/javascript\" src=\"chat.js\"></script>\n" );
+#endif
+
+   if( NULL == mini ) {
+      page.flags |= WEBUTIL_PAGE_FLAG_NOBODY;
+      page.flags |= WEBUTIL_PAGE_FLAG_NONAV;
+      page.flags |= WEBUTIL_PAGE_FLAG_NOTITLE;
+
+      retval = bassignformat( page.text,
+         "<frameset rows=\"10%%,80%%,10%%\">"
+            "<frame name=\"top\" src=\"/chat?mini=nav\" />"
+            "<frame name=\"main\" src=\"/chat?mini=top\" />"
+            "<frame name=\"bottom\" src=\"/chat?mini=bottom\" />"
+         "</frameset>" );
+      bcgi_check_bstr_err( page.text );
+
+   } else if( biseqcaselessStatic( mini, "nav" ) ) {
+
+   } else if( biseqcaselessStatic( mini, "top" ) ) {
+      /* Show current messages. */
+
+      /* Remove page decorations. */
+      page.flags |= WEBUTIL_PAGE_FLAG_NOTITLE;
+      page.flags |= WEBUTIL_PAGE_FLAG_NONAV;
+
+      /* Add auto-refresh. */
+      retval = webutil_add_script( &page,
+         "<meta http-equiv=\"refresh\" content=\"2\" />\n" );
+
       retval = bcatcstr( page.text, "<table class=\"chat-messages\">\n" );
       bcgi_check_bstr_err( page.text );
 
-      /* Add refresher/convenience script. */
-      retval = webutil_add_script( &page,
-         "<script src=\"https://code.jquery.com/jquery-2.2.4.min.js\" integrity=\"sha256-BbhdlvQf/xTY9gja0Dq3HiwQF8LaCRTXxZKRutelT44=\" crossorigin=\"anonymous\"></script>\n" );
-      retval = webutil_add_script( &page,
-         "<script type=\"text/javascript\" src=\"chat.js\"></script>\n" );
-   }
-
-   retval = chatdb_iter_messages(
-      &page, db, 0, 0, cchat_print_msg_cb, &err_msg );
-   if( retval ) {
-      dbglog_error( "error iteraing messages!\n" );
-      goto cleanup;
-   }
-
-   if( NULL == mini || !biseqcaselessStatic( mini, "true" ) ) {
-      /* Close table and show form. */
+      retval = chatdb_iter_messages(
+         &page, db, 0, 0, cchat_print_msg_cb, &err_msg );
+      if( retval ) {
+         dbglog_error( "error iteraing messages!\n" );
+         goto cleanup;
+      }
 
       retval = bcatcstr( page.text, "</table>\n" );
       bcgi_check_bstr_err( page.text );
+
+   } else if( biseqcaselessStatic( mini, "bottom" ) ) {
+      /* Remove page decorations. */
+      page.flags |= WEBUTIL_PAGE_FLAG_NOTITLE;
+      page.flags |= WEBUTIL_PAGE_FLAG_NONAV;
 
       /* See if a valid session exists (don't urldecode!). */
       retval = bcgi_query_key( c, "session", &session );
@@ -763,14 +793,9 @@ int cchat_route_chat(
          "</div>\n",
          bdata( session ) );
       bcgi_check_bstr_err( page.text );
-
-      retval = webutil_show_page( req, q, p, &page, 0 );
-   } else {
-      FCGX_FPrintF( req->out, "Content-type: text/html\r\n" );
-      FCGX_FPrintF( req->out, "Status: 200\r\n\r\n" );
-
-      FCGX_FPrintF( req->out, "%s", bdata( page.text ) );
    }
+
+   retval = webutil_show_page( req, q, p, &page );
 
 cleanup:
 
