@@ -23,7 +23,7 @@ struct CHATDB_ARG {
    chatdb_iter_msg_cb_t cb_msg;
    chatdb_iter_user_cb_t cb_user;
    chatdb_iter_session_cb_t cb_session;
-   struct CCHAT_PAGE* page;
+   struct WEBUTIL_PAGE* page;
    bstring password_test;
    int* user_id_out_p;
    FCGX_Request* req;
@@ -414,7 +414,7 @@ cleanup:
 }
 
 int chatdb_iter_messages(
-   struct CCHAT_PAGE* page, sqlite3* db,
+   struct WEBUTIL_PAGE* page, sqlite3* db,
    int msg_type, int dest_id, chatdb_iter_msg_cb_t cb, bstring* err_msg_p
 ) {
    int retval = 0;
@@ -531,7 +531,7 @@ cleanup:
 }
 
 int chatdb_iter_users(
-   struct CCHAT_PAGE* page, sqlite3* db, FCGX_Request* req,
+   struct WEBUTIL_PAGE* page, sqlite3* db, FCGX_Request* req,
    bstring user_name, int user_id, bstring password_test, int* user_id_out_p,
    chatdb_iter_user_cb_t cb, bstring* err_msg_p
 ) {
@@ -694,7 +694,7 @@ cleanup:
 }
 
 int chatdb_iter_sessions(
-   struct CCHAT_PAGE* page, int* user_id_out_p, sqlite3* db,
+   struct WEBUTIL_PAGE* page, int* user_id_out_p, sqlite3* db,
    bstring hash, bstring remote_host,
    chatdb_iter_session_cb_t cb, bstring* err_msg_p
 ) {
@@ -748,7 +748,7 @@ cleanup:
 
 
 int chatdb_remove_session(
-   struct CCHAT_PAGE* page, sqlite3* db, bstring hash, bstring* err_msg_p
+   struct WEBUTIL_PAGE* page, sqlite3* db, bstring hash, bstring* err_msg_p
 ) {
    int retval = 0;
    char* err_msg = NULL;

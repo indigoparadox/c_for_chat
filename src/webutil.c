@@ -3,6 +3,111 @@
 
 #include <curl/curl.h>
 
+int webutil_add_script( struct WEBUTIL_PAGE* page, const char* script ) {
+   int retval = 0;
+
+   assert( script[strlen( script ) - 1] == '\n' );
+
+   if( NULL == page->scripts ) {
+      page->scripts = bfromcstr(
+         "<script src=\"https://www.google.com/recaptcha/api.js\" "
+            "async defer></script>\n" );
+   } else {
+      retval = bcatcstr( page->scripts, script );
+      bcgi_check_bstr_err( page->scripts );
+   }
+
+   bcgi_check_null( page->scripts );
+
+cleanup:
+
+   return retval;
+}
+
+int webutil_show_page(
+   FCGX_Request* req, struct bstrList* q, struct bstrList* p,
+   struct WEBUTIL_PAGE* page, uint8_t flags
+) {
+   int retval = 0;
+   size_t i = 0;
+   bstring err_msg = NULL;
+   bstring err_msg_decoded = NULL;
+   bstring err_msg_escaped = NULL;
+
+   FCGX_FPrintF( req->out, "Content-type: text/html\r\n" );
+   FCGX_FPrintF( req->out, "Status: 200\r\n\r\n" );
+
+   FCGX_FPrintF( req->out, "<html>\n" );
+   FCGX_FPrintF( req->out, "<head><title>%s</title>\n", bdata( page->title ) );
+   FCGX_FPrintF( req->out, "<link rel=\"stylesheet\" href=\"style.css\" />\n" );
+   if( NULL != page->scripts ) {
+      FCGX_FPrintF( req->out, "%s", bdata( page->scripts ) );
+   }
+   FCGX_FPrintF( req->out, "</head>\n" );
+   FCGX_FPrintF( req->out, "<body>\n" );
+   FCGX_FPrintF( req->out, "<h1 class=\"page-title\">%s</h1>\n",
+      bdata( page->title ) );
+   if( WEBUTIL_PAGE_FLAG_NONAV != (WEBUTIL_PAGE_FLAG_NONAV & flags) ) {
+      FCGX_FPrintF( req->out, "<ul class=\"page-nav\">\n" );
+      FCGX_FPrintF( req->out, "<li><a href=\"/chat\">Chat</a>\n" );
+      FCGX_FPrintF( req->out, "<li><a href=\"/profile\">Profile</a>\n" );
+      FCGX_FPrintF( req->out, "<li><a href=\"/logout\">Logout</a>\n" );
+      FCGX_FPrintF( req->out, "</ul>\n" );
+   }
+
+   /* Show error message if any. */
+   if( NULL != q ) {
+      for( i = 0 ; q->qty > i ; i++ ) {
+         retval = bcgi_query_key( q, "error", &err_msg );
+         if( retval ) {
+            dbglog_error( "error processing query string!\n" );
+            goto cleanup;
+         }
+      }
+
+      if( NULL != err_msg ) {
+         /* Decode HTML from query string. */
+         retval = bcgi_urldecode( err_msg, &err_msg_decoded );
+         if( retval ) {
+            goto cleanup;
+         }
+
+         /* Sanitize HTML. */
+         retval = bcgi_html_escape( err_msg_decoded, &err_msg_escaped );
+         if( retval ) {
+            goto cleanup;
+         }
+
+         FCGX_FPrintF(
+            req->out, "<div class=\"page-error\">%s</div>\n",
+            bdata( err_msg_escaped ) );
+      }
+   }
+
+   FCGX_FPrintF( req->out, "%s", bdata( page->text ) );
+
+cleanup:
+
+   if( NULL == err_msg_decoded ) {
+      bdestroy( err_msg_decoded );
+   }
+
+   if( NULL == err_msg_escaped ) {
+      bdestroy( err_msg_escaped );
+   }
+
+   if( NULL == err_msg ) {
+      bdestroy( err_msg );
+   }
+
+   /* Close page. */
+   FCGX_FPrintF( req->out, "</body>\n" );
+   FCGX_FPrintF( req->out, "</html>\n" );
+
+   return retval;
+
+}
+
 static int webutil_curl_writer(
    char *data, size_t size, size_t nmemb, bstring writer_data
 ) {

@@ -1,14 +1,11 @@
 
 #include "main.h"
 
-#include <stdint.h>
 #include <stdlib.h> /* for atoi() */
 
 typedef int (*cchat_route_cb_t)(
    FCGX_Request* req, int auth_user_id,
    struct bstrList* q, struct bstrList* p, struct bstrList* c, sqlite3* db );
-
-#define CCHAT_PAGE_FLAG_NONAV    0x01
 
 #define CCHAT_ROUTES_TABLE( f ) \
    f( "/logout", cchat_route_logout, "GET" ) \
@@ -38,90 +35,6 @@ typedef int (*cchat_route_cb_t)(
 #define cchat_decode_field( list, field_name ) \
    cchat_decode_field_rename( list, field_name, field_name );
 
-static int cchat_page(
-   FCGX_Request* req, struct bstrList* q, struct bstrList* p,
-   struct CCHAT_PAGE* page, uint8_t flags
-) {
-   int retval = 0;
-   size_t i = 0;
-   bstring err_msg = NULL;
-   bstring err_msg_decoded = NULL;
-   bstring err_msg_escaped = NULL;
-
-   FCGX_FPrintF( req->out, "Content-type: text/html\r\n" );
-   FCGX_FPrintF( req->out, "Status: 200\r\n\r\n" );
-
-   FCGX_FPrintF( req->out, "<html>\n" );
-   FCGX_FPrintF( req->out, "<head><title>%s</title>\n", bdata( page->title ) );
-   FCGX_FPrintF( req->out, "<link rel=\"stylesheet\" href=\"style.css\" />\n" );
-   if( NULL != page->scripts ) {
-      FCGX_FPrintF( req->out, "%s", bdata( page->scripts ) );
-   }
-   FCGX_FPrintF( req->out, "</head>\n" );
-   FCGX_FPrintF( req->out, "<body>\n" );
-   FCGX_FPrintF( req->out, "<h1 class=\"page-title\">%s</h1>\n",
-      bdata( page->title ) );
-   if( CCHAT_PAGE_FLAG_NONAV != (CCHAT_PAGE_FLAG_NONAV & flags) ) {
-      FCGX_FPrintF( req->out, "<ul class=\"page-nav\">\n" );
-      FCGX_FPrintF( req->out, "<li><a href=\"/chat\">Chat</a>\n" );
-      FCGX_FPrintF( req->out, "<li><a href=\"/profile\">Profile</a>\n" );
-      FCGX_FPrintF( req->out, "<li><a href=\"/logout\">Logout</a>\n" );
-      FCGX_FPrintF( req->out, "</ul>\n" );
-   }
-
-   /* Show error message if any. */
-   if( NULL != q ) {
-      for( i = 0 ; q->qty > i ; i++ ) {
-         retval = bcgi_query_key( q, "error", &err_msg );
-         if( retval ) {
-            dbglog_error( "error processing query string!\n" );
-            goto cleanup;
-         }
-      }
-
-      if( NULL != err_msg ) {
-         /* Decode HTML from query string. */
-         retval = bcgi_urldecode( err_msg, &err_msg_decoded );
-         if( retval ) {
-            goto cleanup;
-         }
-
-         /* Sanitize HTML. */
-         retval = bcgi_html_escape( err_msg_decoded, &err_msg_escaped );
-         if( retval ) {
-            goto cleanup;
-         }
-
-         FCGX_FPrintF(
-            req->out, "<div class=\"page-error\">%s</div>\n",
-            bdata( err_msg_escaped ) );
-      }
-   }
-
-   FCGX_FPrintF( req->out, "%s", bdata( page->text ) );
-
-cleanup:
-
-   if( NULL == err_msg_decoded ) {
-      bdestroy( err_msg_decoded );
-   }
-
-   if( NULL == err_msg_escaped ) {
-      bdestroy( err_msg_escaped );
-   }
-
-   if( NULL == err_msg ) {
-      bdestroy( err_msg );
-   }
-
-   /* Close page. */
-   FCGX_FPrintF( req->out, "</body>\n" );
-   FCGX_FPrintF( req->out, "</html>\n" );
-
-   return retval;
-
-}
-
 int cchat_route_logout(
    FCGX_Request* req, int auth_user_id,
    struct bstrList* q, struct bstrList* p, struct bstrList* c, sqlite3* db
@@ -149,7 +62,7 @@ int cchat_route_logout(
 }
 
 static int cchat_profile_form(
-   struct CCHAT_PAGE* page, bstring user_name, bstring email, bstring session,
+   struct WEBUTIL_PAGE* page, bstring user_name, bstring email, bstring session,
    bstring recaptcha_site_key
 ) {
    int retval = 0;
@@ -231,7 +144,7 @@ cleanup:
 }
 
 int cchat_profile_user_cb(
-   struct CCHAT_PAGE* page, FCGX_Request* req,
+   struct WEBUTIL_PAGE* page, FCGX_Request* req,
    bstring password_test, int* user_id_out_p,
    int user_id, bstring user_name, bstring email,
    bstring hash, size_t hash_sz, bstring salt, size_t iters, time_t msg_time
@@ -296,7 +209,7 @@ int cchat_route_profile(
 ) {
    int retval = 0;
    struct tagbstring page_title = bsStatic( "Profile" );
-   struct CCHAT_PAGE page = { 0, 0, 0 };
+   struct WEBUTIL_PAGE page = { 0, 0, 0 };
    struct tagbstring empty_string = bsStatic( "" );
 
    page.title = &page_title;
@@ -321,7 +234,7 @@ int cchat_route_profile(
          &page, &empty_string, &empty_string, NULL, NULL );
    }
 
-   retval = cchat_page( req, q, p, &page, 0 );
+   retval = webutil_show_page( req, q, p, &page, 0 );
 
 cleanup:
 
@@ -451,7 +364,7 @@ int cchat_route_login(
    struct bstrList* q, struct bstrList* p, struct bstrList* c, sqlite3* db
 ) {
    int retval = 0;
-   struct CCHAT_PAGE page = { 0, 0, 0 };
+   struct WEBUTIL_PAGE page = { 0, 0, 0 };
    struct tagbstring page_title = bsStatic( "Login" );
    bstring recaptcha_site_key = NULL;
 
@@ -497,7 +410,7 @@ int cchat_route_login(
 
    page.title = &page_title;
 
-   retval = cchat_page( req, q, p, &page, CCHAT_PAGE_FLAG_NONAV );
+   retval = webutil_show_page( req, q, p, &page, WEBUTIL_PAGE_FLAG_NONAV );
 
 cleanup:
 
@@ -508,7 +421,7 @@ cleanup:
 }
 
 int cchat_auth_user_cb(
-   struct CCHAT_PAGE* page, FCGX_Request* req,
+   struct WEBUTIL_PAGE* page, FCGX_Request* req,
    bstring password_test, int* user_id_out_p,
    int user_id, bstring user_name, bstring email,
    bstring hash, size_t hash_sz, bstring salt, size_t iters, time_t msg_time
@@ -731,7 +644,7 @@ cleanup:
 }
 
 int cchat_print_msg_cb(
-   struct CCHAT_PAGE* page,
+   struct WEBUTIL_PAGE* page,
    int msg_id, int msg_type, bstring from, int to, bstring text, time_t msg_time
 ) {
    int retval = 0;
@@ -785,7 +698,7 @@ int cchat_route_chat(
    struct tagbstring page_title = bsStatic( "Chat" );
    bstring err_msg = NULL;
    bstring session = NULL;
-   struct CCHAT_PAGE page = { 0, 0, 0 };
+   struct WEBUTIL_PAGE page = { 0, 0, 0 };
 
    page.title = &page_title;
 
@@ -859,7 +772,7 @@ int cchat_route_chat(
       goto cleanup;
    }
 
-   retval = cchat_page( req, q, p, &page, 0 );
+   retval = webutil_show_page( req, q, p, &page, 0 );
 
 cleanup:
 
@@ -958,7 +871,7 @@ cchat_route_cb_t gc_cchat_route_cbs[] = {
 };
 
 int cchat_auth_session_cb(
-   struct CCHAT_PAGE* page, int* user_id_out_p,
+   struct WEBUTIL_PAGE* page, int* user_id_out_p,
    int session_id, int user_id,
    bstring hash, size_t hash_sz, bstring remote_host, time_t start_time
 ) {
