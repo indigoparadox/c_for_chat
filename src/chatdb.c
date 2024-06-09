@@ -32,6 +32,7 @@ struct CHATDB_ARG {
 int chatdb_init( bstring path, sqlite3** db_p ) {
    int retval = 0;
    char* err_msg = NULL;
+   union CHATDB_OPTION_VAL schema_ver;
 
    retval = sqlite3_open( bdata( path ), db_p );
    if( SQLITE_OK != retval ) {
@@ -66,7 +67,8 @@ int chatdb_init( bstring path, sqlite3** db_p ) {
          "hash_sz integer not null, "
          "salt text not null, "
          "iters integer not null, "
-         "join_time datetime default current_timestamp );", NULL, 0, &err_msg );
+         "join_time datetime default current_timestamp, "
+         "session_timeout default 3600 );", NULL, 0, &err_msg );
    if( SQLITE_OK != retval ) {
       dbglog_error( "could not create database user table: %s\n", err_msg );
       retval = RETVAL_DB;
@@ -104,6 +106,37 @@ int chatdb_init( bstring path, sqlite3** db_p ) {
       retval = RETVAL_DB;
       sqlite3_free( err_msg );
       goto cleanup;
+   }
+
+   /* Check to see if we're running an old schema. */
+   schema_ver.integer = 0;
+   retval = chatdb_get_option( "schema_version", &schema_ver, *db_p, NULL );
+   if( retval ) {
+      dbglog_error( "error getting schema version!\n" );
+      goto cleanup;
+   }
+   dbglog_debug( 9, "schema version: %d\n", schema_ver.integer );
+   switch( schema_ver.integer ) {
+   case 0:
+      /* Bring up to version one. */
+      retval = sqlite3_exec( *db_p,
+         "alter table users add column session_timeout integer default 3600",
+         NULL, 0, &err_msg );
+      if( SQLITE_OK != retval ) {
+         dbglog_error( "could not update users table: %s\n", err_msg );
+         retval = RETVAL_DB;
+         sqlite3_free( err_msg );
+         goto cleanup;
+      }
+      schema_ver.integer = 1;
+      retval = chatdb_set_option( 
+         "schema_version", &schema_ver, CHATDB_OPTION_FMT_INT, *db_p, NULL );
+      if( retval ) {
+         dbglog_error( "error setting schema version!\n" );
+         goto cleanup;
+      }
+      dbglog_debug( 9, "updated schema version: %d\n", schema_ver.integer );
+      break;
    }
 
    /* We got this far, so everything's OK? */

@@ -21,7 +21,6 @@ int main( int argc, char* argv[] ) {
    int o = 0;
    bstring log_path = NULL;
    bstring server_listen = NULL;
-   union CHATDB_OPTION_VAL schema_ver;
 
    /* Parse args. */
    while( -1 != (o = getopt( argc, argv, "l:d:s:" )) ) {
@@ -91,14 +90,6 @@ int main( int argc, char* argv[] ) {
    if( retval ) {
       goto cleanup;
    }
-
-   schema_ver.integer = 0;
-   retval = chatdb_get_option( "schema_version", &schema_ver, db, NULL );
-   if( retval ) {
-      dbglog_error( "error getting schema version!\n" );
-      goto cleanup;
-   }
-   dbglog_debug( 9, "schema version: %d\n", schema_ver.integer );
 
    dbglog_debug( 3, "initializing FastCGI...\n" );
 
