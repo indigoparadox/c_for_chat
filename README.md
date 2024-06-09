@@ -13,6 +13,8 @@ C is for Chat is a web-based chat server designed to be simple and self-reliant.
  * Profile pictures.
  * Administrative commands.
  * Configuration panel.
+ * Work out schema versioning.
+ * Client timezone display.
 
 # Compiling
 

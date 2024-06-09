@@ -4,6 +4,14 @@
 
 /* TODO: Timestamp. */
 
+#define CHATDB_OPTION_FMT_INT 0
+#define CHATDB_OPTION_FMT_STR 1
+
+union CHATDB_OPTION_VAL {
+   int integer;
+   bstring str;
+};
+
 typedef int (*chatdb_iter_msg_cb_t)(
    struct WEBUTIL_PAGE* page,
    int msg_id, int msg_type, bstring from, int to, bstring text, time_t msg_time );
@@ -57,6 +65,14 @@ int chatdb_iter_sessions(
 
 int chatdb_remove_session(
    struct WEBUTIL_PAGE* page, sqlite3* db, bstring hash, bstring* err_msg_p );
+
+int chatdb_get_option(
+   const char* key, union CHATDB_OPTION_VAL* val,
+   sqlite3* db, bstring* err_msg_p );
+
+int chatdb_set_option(
+   const char* key, union CHATDB_OPTION_VAL* val, int format,
+   sqlite3* db, bstring* err_msg_p );
 
 #endif /* !CHATDB_H */
 

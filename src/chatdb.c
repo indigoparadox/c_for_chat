@@ -91,12 +91,16 @@ int chatdb_init( bstring path, sqlite3** db_p ) {
       goto cleanup;
    }
 
-   /* Create schema table if it doesn't exist. */
+   /* Create options table if it doesn't exist. */
    retval = sqlite3_exec( *db_p,
-      "create table if not exists chat_schema( version int );",
+      "create table if not exists options( "
+         "option_id integer primary key, "
+         "key text not null unique, "
+         "value text not null, "
+         "format integer not null );",
       NULL, 0, &err_msg );
    if( SQLITE_OK != retval ) {
-      dbglog_error( "could not create database system table: %s\n", err_msg );
+      dbglog_error( "could not create database options table: %s\n", err_msg );
       retval = RETVAL_DB;
       sqlite3_free( err_msg );
       goto cleanup;
@@ -789,5 +793,133 @@ cleanup:
 
    return retval;
 
+}
+
+static
+int chatdb_dbcb_options( void* arg, int argc, char** argv, char **col ) {
+   int retval = 0;
+   union CHATDB_OPTION_VAL* val_p = (union CHATDB_OPTION_VAL*)arg;
+   int format = 0;
+
+   format = atoi( argv[2] );
+
+   switch( format ) {
+   case CHATDB_OPTION_FMT_INT:
+      val_p->integer = atoi( argv[1] );
+      break;
+
+   case CHATDB_OPTION_FMT_STR:
+      val_p->str = bfromcstr( argv[1] );
+      break;
+   }
+
+   return retval;
+}
+
+int chatdb_get_option(
+   const char* key, union CHATDB_OPTION_VAL* val,
+   sqlite3* db, bstring* err_msg_p
+) {
+   int retval = 0;
+   char* err_msg = NULL;
+   char* query = NULL;
+
+   query = sqlite3_mprintf(
+      "select key, value, format from options where key = '%q'", key );
+   if( NULL == query ) {
+      dbglog_error( "could not allocate database session select!\n" );
+      retval = RETVAL_ALLOC;
+      goto cleanup;
+   }
+
+   retval = sqlite3_exec(
+      db, query, chatdb_dbcb_options, val, &err_msg );
+   if( SQLITE_OK != retval ) {
+      dbglog_error( "could not execute database session query: %s\n",
+         err_msg );
+      if( NULL != err_msg_p ) {
+         *err_msg_p = bfromcstr( err_msg );
+      }
+      retval = RETVAL_DB;
+      goto cleanup;
+   }
+
+   /* We got this far, so everything's OK? */
+   retval = 0;
+
+cleanup:
+
+   if( NULL != query ) {
+      sqlite3_free( query );
+   }
+
+   if( NULL != err_msg ) {
+      sqlite3_free( err_msg );
+   }
+
+   return retval;
+}
+
+int chatdb_set_option(
+   const char* key, union CHATDB_OPTION_VAL* val, int format,
+   sqlite3* db, bstring* err_msg_p
+) {
+   int retval = 0;
+   char* query = NULL;
+   char* err_msg = NULL;
+   bstring value_set = NULL;
+
+   switch( format ) {
+   case CHATDB_OPTION_FMT_INT:
+      value_set = bformat( "%d", val->integer );
+      if( NULL == value_set ) {
+         /* This might be invalid input, so don't make it the harder "ALLOC". */
+         dbglog_error( "unable to parse integer value!\n" );
+         retval = RETVAL_PARAMS;
+         goto cleanup;
+      }
+      break;
+
+   case CHATDB_OPTION_FMT_STR:
+      value_set = bstrcpy( val->str );
+      bcgi_check_null( value_set );
+      break;
+
+   default:
+      dbglog_error( "invalid option format specified!\n" );
+      retval = RETVAL_DB;
+      goto cleanup;
+   }
+
+   /* Generate an insert query. */
+   query = sqlite3_mprintf(
+      "insert into options "
+      "(key, value, format) values('%q', '%q', '%d') "
+      "on conflict(key) do update set value=excluded.value",
+      key, bdata( value_set ), format );
+   bcgi_check_null( query );
+
+   retval = sqlite3_exec( db, query, NULL, NULL, &err_msg );
+   if( SQLITE_OK != retval ) {
+      retval = RETVAL_DB;
+      if( NULL != err_msg_p ) {
+         *err_msg_p = bfromcstr( err_msg );
+      }
+      goto cleanup;
+   }
+
+cleanup:
+
+   bcgi_cleanup_bstr( value_set, likely );
+
+   if( NULL != query ) {
+      sqlite3_free( query );
+   }
+
+   if( NULL != err_msg ) {
+      sqlite3_free( err_msg );
+   }
+
+   return retval;
 }
 
