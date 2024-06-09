@@ -711,6 +711,8 @@ int chatdb_iter_sessions(
          "strftime('%%s', start_time) from sessions "
          "where hash = '%q' and remote_host = '%q'",
       bdata( hash ), bdata( remote_host ) );
+   /* XXX */
+   dbglog_debug( 1, "query: %s\n", query );
    if( NULL == query ) {
       dbglog_error( "could not allocate database session select!\n" );
       retval = RETVAL_ALLOC;

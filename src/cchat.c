@@ -486,16 +486,10 @@ int cchat_route_auth(
    if( retval || 0 > user_id ) {
       if( NULL != err_msg ) {
          retval = bassigncstr( err_msg, "Invalid username or password!" );
-         if( BSTR_OK != retval ) {
-            dbglog_error( "unable to allocate error message!\n" );
-            retval = RETVAL_ALLOC;
-         }
+         bcgi_check_bstr_err( err_msg );
       } else {
          err_msg = bfromcstr( "Invalid username or password!" );
-         if( NULL == err_msg ) {
-            dbglog_error( "unable to allocate error message!\n" );
-            retval = RETVAL_ALLOC;
-         }
+         bcgi_check_null( err_msg );
       }
       goto cleanup;
    }
@@ -507,6 +501,8 @@ int cchat_route_auth(
       assert( NULL != err_msg );
       goto cleanup;
    }
+
+   dbglog_debug( 2, "setting authorized session cookie: %s\n", bdata( hash ) );
 
    /* Set auth cookie. */
    FCGX_FPrintF( req->out, "Set-Cookie: session=%s; Max-Age=3600; HttpOnly\r\n",
@@ -677,6 +673,8 @@ int cchat_route_chat(
    page.flags = 0;
 
    if( 0 > auth_user_id ) {
+      dbglog_debug( 3, "/chat access by unauthorized user!\n" );
+
       /* Invalid user; redirect to login. */
       FCGX_FPrintF( req->out, "Status: 303 See Other\r\n" );
       FCGX_FPrintF( req->out, "Location: /login\r\n" );
@@ -844,7 +842,7 @@ int cchat_auth_session_cb(
 ) {
    int retval = 0;
 
-   /* TODO: Check remote host. */
+   dbglog_debug( 2, "set authorized user to: %d\n", user_id );
    *user_id_out_p = user_id;
 
    return retval;
@@ -859,20 +857,22 @@ int cchat_handle_req( FCGX_Request* req, sqlite3* db ) {
    bstring post_buf = NULL;
    bstring req_cookie = NULL;
    bstring session = NULL;
-   struct tagbstring remote_host = bsStatic( "127.0.0.1" ); /* TODO */
+   bstring remote_host = NULL;
    size_t post_buf_sz = 0;
    struct bstrList* req_query_list = NULL;
    struct bstrList* post_buf_list = NULL;
    struct bstrList* req_cookie_list = NULL;
    int auth_user_id = -1;
 
-   if( 1 >= g_dbglog_level ) {
+   if( 0 >= g_dbglog_level ) {
       while( NULL != req->envp[i] ) {
-         dbglog_debug( 1, "envp: %s\n", req->envp[i] );
+         dbglog_debug( 0, "envp: %s\n", req->envp[i] );
          i++;
       }
       i = 0;
    }
+
+   remote_host = bfromcstr( FCGX_GetParam( "REMOTE_ADDR", req->envp ) );
 
    /* Figure out our request method and consequent action. */
    req_method = bfromcstr( FCGX_GetParam( "REQUEST_METHOD", req->envp ) );
@@ -897,20 +897,20 @@ int cchat_handle_req( FCGX_Request* req, sqlite3* db ) {
    /* Get cookies and split into list. */
    req_cookie = bfromcstr( FCGX_GetParam( "HTTP_COOKIE", req->envp ) );
    if( NULL != req_cookie ) {
+      /* Split the cookie string. */
       req_cookie_list = bsplit( req_cookie, '&' );
-      if( NULL == req_cookie_list ) {
-         dbglog_error( "could not allocate cookie list!\n" );
-         retval = RETVAL_ALLOC;
-         goto cleanup;
-      }
+      bcgi_check_null( req_cookie_list );
 
       /* See if a valid session exists (don't urldecode!). */
       retval = bcgi_query_key( req_cookie_list, "session", &session );
       if( !retval && NULL != session ) {
+         dbglog_debug( 2, "session cookie found: %s\n", bdata( session ) );
          chatdb_iter_sessions(
             NULL, &auth_user_id, db, session,
-            &remote_host, cchat_auth_session_cb, NULL );
+            remote_host, cchat_auth_session_cb, NULL );
       }
+   } else {
+      dbglog_debug( 3, "no cookies present!\n" );
    }
 
    /* Get POST data (if any). */
@@ -981,6 +981,7 @@ cleanup:
       bstrListDestroy( req_query_list );
    }
 
+   bcgi_cleanup_bstr( remote_host, likely );
    bcgi_cleanup_bstr( post_buf, likely );
    bcgi_cleanup_bstr( session, likely );
    bcgi_cleanup_bstr( req_cookie, likely );
