@@ -7,6 +7,9 @@ typedef int (*cchat_route_cb_t)(
    FCGX_Request* req, int auth_user_id,
    struct bstrList* q, struct bstrList* p, struct bstrList* c, sqlite3* db );
 
+extern bstring g_recaptcha_site_key;
+extern bstring g_recaptcha_secret_key;
+
 #define CCHAT_ROUTES_TABLE( f ) \
    f( "/logout", cchat_route_logout, "GET" ) \
    f( "/profile", cchat_route_profile, "GET" ) \
@@ -63,8 +66,7 @@ int cchat_route_logout(
 }
 
 static int cchat_profile_form(
-   struct WEBUTIL_PAGE* page, bstring user_name, bstring email, bstring session,
-   bstring recaptcha_site_key
+   struct WEBUTIL_PAGE* page, bstring user_name, bstring email, bstring session
 ) {
    int retval = 0;
 
@@ -108,11 +110,11 @@ static int cchat_profile_form(
       }
    }
 
-   if( NULL != bdata( recaptcha_site_key ) ) {
+   if( NULL != bdata( g_recaptcha_site_key ) ) {
       /* Add recaptcha if key present. */
       retval = bformata( page->text,
          "<div class=\"g-recaptcha\" data-sitekey=\"%s\"></div>\n",
-         bdata( recaptcha_site_key ) );
+         bdata( g_recaptcha_site_key ) );
       if( BSTR_ERR == retval ) {
          dbglog_error( "unable to allocate profile form!\n" );
          retval = RETVAL_ALLOC;
@@ -151,7 +153,6 @@ int cchat_profile_user_cb(
    int retval = 0;
    bstring session = NULL;
    bstring req_cookie = NULL;
-   bstring recaptcha_site_key = NULL;
    struct bstrList* c = NULL;
 
    req_cookie = bfromcstr( FCGX_GetParam( "HTTP_COOKIE", req->envp ) );
@@ -161,16 +162,8 @@ int cchat_profile_user_cb(
       goto cleanup;
    }
 
-   recaptcha_site_key = bfromcstr(
-      FCGX_GetParam( "CCHAT_RECAPTCHA_SITE", req->envp ) );
-   /* It's fine if this turns out to be NULL. */
-
    c = bsplit( req_cookie, '&' );
-   if( NULL == c ) {
-      dbglog_error( "could not allocate cookie list!\n" );
-      retval = RETVAL_ALLOC;
-      goto cleanup;
-   }
+   bcgi_check_null( c );
 
    /* See if a valid session exists (don't urldecode!). */
    retval = bcgi_query_key( c, "session", &session );
@@ -178,14 +171,9 @@ int cchat_profile_user_cb(
       goto cleanup;
    }
 
-   retval = cchat_profile_form(
-      page, user_name, email, session, recaptcha_site_key );
+   retval = cchat_profile_form( page, user_name, email, session );
 
 cleanup:
-
-   if( NULL != recaptcha_site_key ) {
-      bdestroy( recaptcha_site_key );
-   }
 
    if( NULL != c ) {
       bstrListDestroy( c );
@@ -229,9 +217,7 @@ int cchat_route_profile(
          goto cleanup;
       }
    } else {
-      retval = cchat_profile_form(
-         /* TODO: Add recaptcha. */
-         &page, &empty_string, &empty_string, NULL, NULL );
+      retval = cchat_profile_form( &page, &empty_string, &empty_string, NULL );
    }
 
    retval = webutil_show_page( req, q, p, &page );
@@ -366,11 +352,6 @@ int cchat_route_login(
    int retval = 0;
    struct WEBUTIL_PAGE page = { 0, 0, 0 };
    struct tagbstring page_title = bsStatic( "Login" );
-   bstring recaptcha_site_key = NULL;
-
-   recaptcha_site_key = bfromcstr(
-      FCGX_GetParam( "CCHAT_RECAPTCHA_SITE", req->envp ) );
-   /* It's fine if this turns out to be NULL. */
 
    page.text = bfromcstr(
       "<div class=\"login-form\">\n"
@@ -385,11 +366,11 @@ int cchat_route_login(
    );
    bcgi_check_null( page.text );
 
-   if( NULL != bdata( recaptcha_site_key ) ) {
+   if( NULL != bdata( g_recaptcha_site_key ) ) {
       /* Add recaptcha if key present. */
       retval = bformata( page.text,
          "<div class=\"g-recaptcha\" data-sitekey=\"%s\"></div>\n",
-         bdata( recaptcha_site_key ) );
+         bdata( g_recaptcha_site_key ) );
       if( BSTR_ERR == retval ) {
          dbglog_error( "unable to allocate profile form!\n" );
          retval = RETVAL_ALLOC;
@@ -418,7 +399,6 @@ int cchat_route_login(
 cleanup:
 
    bcgi_cleanup_bstr( page.text, likely );
-   bcgi_cleanup_bstr( recaptcha_site_key, likely );
 
    return retval;
 }
@@ -889,19 +869,10 @@ int cchat_handle_req( FCGX_Request* req, sqlite3* db ) {
 
    /* Figure out our request method and consequent action. */
    req_method = bfromcstr( FCGX_GetParam( "REQUEST_METHOD", req->envp ) );
-   if( NULL == req_method ) {
-      dbglog_error( "invalid request params!\n" );
-      retval = RETVAL_PARAMS;
-      goto cleanup;
-   }
+   bcgi_check_null( req_method );
 
-   /* TODO: URLdecode paths. */
    req_uri_raw = bfromcstr( FCGX_GetParam( "DOCUMENT_URI", req->envp ) );
-   if( NULL == req_uri_raw ) {
-      dbglog_error( "invalid request URI!\n" );
-      retval = RETVAL_PARAMS;
-      goto cleanup;
-   }
+   bcgi_check_null( req_uri_raw );
 
    /* Get query string and split into list. */
    req_query = bfromcstr( FCGX_GetParam( "QUERY_STRING", req->envp ) );
@@ -975,11 +946,14 @@ int cchat_handle_req( FCGX_Request* req, sqlite3* db ) {
       0 != blength( &(gc_cchat_route_paths[i]) ) &&
       0 == bstrcmp( &(gc_cchat_route_methods[i]), req_method )
    ) {
+      dbglog_debug( 1, "found root for URI: %s\n", bdata( req_uri_raw ) );
       /* A valid route was found! */
       retval = gc_cchat_route_cbs[i](
          req, auth_user_id,
          req_query_list, post_buf_list, req_cookie_list, db );
    } else {
+      dbglog_debug(
+         1, "did not find root for URI: %s\n", bdata( req_uri_raw ) );
       FCGX_FPrintF( req->out, "Status: 404 Bad Request\r\n\r\n" );
    }
 

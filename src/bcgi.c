@@ -198,10 +198,7 @@ int bcgi_query_key( struct bstrList* array, const char* key, bstring* val_p ) {
 
       /* We've found our key! */
       *val_p = bstrcpy( key_val_arr->entry[1] );
-      if( NULL == *val_p ) {
-         dbglog_error( "could not allocate value bstring!\n" );
-         retval = RETVAL_ALLOC;
-      }
+      bcgi_check_null( *val_p );
       bstrListDestroy( key_val_arr );
       key_val_arr = NULL;
       break;

@@ -3,6 +3,9 @@
 
 #include <curl/curl.h>
 
+bstring g_recaptcha_site_key = NULL;
+bstring g_recaptcha_secret_key = NULL;
+
 int webutil_format_time( bstring* out_p, time_t epoch ) {
    int retval = 0;
    struct tm* ts = NULL;
@@ -190,7 +193,6 @@ static int webutil_curl_writer(
 
 int webutil_check_recaptcha( FCGX_Request* req, bstring recaptcha ) {
    int retval = 0;
-   bstring recaptcha_secret_key = NULL;
    bstring recaptcha_curl_post = NULL;
    bstring remote_host = NULL;
    bstring curl_buffer = NULL;
@@ -198,16 +200,12 @@ int webutil_check_recaptcha( FCGX_Request* req, bstring recaptcha ) {
    CURLcode curl_res;
    const struct tagbstring success_check = bsStatic( "\"success\": true" );
 
-   recaptcha_secret_key = bfromcstr(
-      FCGX_GetParam( "CCHAT_RECAPTCHA_SECRET", req->envp ) );
-   bcgi_check_null( recaptcha_secret_key );
-
    remote_host = bfromcstr( FCGX_GetParam( "REMOTE_ADDR", req->envp ) );
    bcgi_check_null( remote_host );
 
    /* Format POST fields for Google. */
    recaptcha_curl_post = bformat( "secret=%s&response=%s&remoteip=%s",
-      bdata( recaptcha_secret_key ),
+      bdata( g_recaptcha_secret_key ),
       bdata( recaptcha ),
       bdata( remote_host ) );
    bcgi_check_null( recaptcha_curl_post );
@@ -249,7 +247,6 @@ int webutil_check_recaptcha( FCGX_Request* req, bstring recaptcha ) {
 
 cleanup:
 
-   bcgi_cleanup_bstr( recaptcha_secret_key, likely );
    bcgi_cleanup_bstr( recaptcha_curl_post, likely );
    bcgi_cleanup_bstr( remote_host, likely );
 
