@@ -940,8 +940,12 @@ int cchat_handle_req( FCGX_Request* req, sqlite3* db ) {
    req_cookie = bfromcstr( FCGX_GetParam( "HTTP_COOKIE", req->envp ) );
    if( NULL != req_cookie ) {
       /* Split the cookie string. */
-      req_cookie_list = bsplit( req_cookie, '&' );
+      req_cookie_list = bsplit( req_cookie, ';' );
       bcgi_check_null( req_cookie_list );
+      for( i = 0 ; req_cookie_list->qty > i ; i++ ) {
+         btrimws( req_cookie_list->entry[i] );
+         dbglog_debug( 1, "cookie: %s\n", bdata( req_cookie_list->entry[i] ) );
+      }
 
       /* See if a valid session exists (don't urldecode!). */
       retval = bcgi_query_key( req_cookie_list, "session", &session );
