@@ -6,17 +6,47 @@
 #include <string.h> /* for memset() */
 #include <stdlib.h> /* for atoi() */
 #include <unistd.h> /* for getopt() */
+#include <signal.h>
 
 #include <curl/curl.h>
 
 extern bstring g_recaptcha_site_key;
 extern bstring g_recaptcha_secret_key;
 
+static int g_cgi_sock = -1;
+FCGX_Request g_req;
+sqlite3* g_db = NULL;
+
+void main_shutdown( int sig ) {
+
+   dbglog_debug( 1, "shutting down...\n" );
+
+   if( NULL != g_db ) {
+      dbglog_debug( 1, "shutting down database...\n" );
+      chatdb_close( &g_db );
+   }
+
+#ifdef USE_WEBSOCKETS
+   dbglog_debug( 1, "shutting down socket server...\n" );
+   socksrv_stop();
+#endif /* USE_WEBSOCKETS */
+
+   if( 0 <= g_cgi_sock ) {
+      dbglog_debug( 1, "shutting down FastCGI...\n" );
+      FCGX_Free( &g_req, g_cgi_sock );
+   }
+
+   dbglog_debug( 1, "shutting down curl...\n" );
+   curl_global_cleanup();
+
+   dbglog_debug( 1, "shutting down logging...\n" );
+   dbglog_shutdown();
+
+   exit( 0 );
+}
+
 int main( int argc, char* argv[] ) {
-   FCGX_Request req;
-   int cgi_sock = -1;
    int retval = 0;
-   sqlite3* db = NULL;
    struct tagbstring chatdb_path = bsStatic( "chat.db" );
    int o = 0;
    bstring log_path = NULL;
@@ -86,7 +116,7 @@ int main( int argc, char* argv[] ) {
 
    dbglog_debug( 3, "initializing database...\n" );
 
-   retval = chatdb_init( &chatdb_path, &db );
+   retval = chatdb_init( &chatdb_path, &g_db );
    if( retval ) {
       goto cleanup;
    }
@@ -94,7 +124,7 @@ int main( int argc, char* argv[] ) {
    dbglog_debug( 3, "initializing FastCGI...\n" );
 
    FCGX_Init();
-   memset( &req, 0, sizeof( FCGX_Request ) );
+   memset( &g_req, 0, sizeof( FCGX_Request ) );
 
 #ifdef USE_WEBSOCKETS
    dbglog_debug( 3, "starting socket server...\n" );
@@ -106,13 +136,16 @@ int main( int argc, char* argv[] ) {
 
    dbglog_debug( 4, "listening on %s...\n", bdata( server_listen ) );
 
-   cgi_sock = FCGX_OpenSocket( bdata( server_listen ), 100 );
-   FCGX_InitRequest( &req, cgi_sock, 0 );
-	while( 0 <= FCGX_Accept_r( &req ) ) {
+   g_cgi_sock = FCGX_OpenSocket( bdata( server_listen ), 100 );
+   FCGX_InitRequest( &g_req, g_cgi_sock, 0 );
+
+   signal( SIGINT, main_shutdown );
+
+	while( 0 <= FCGX_Accept_r( &g_req ) ) {
 
       dbglog_debug( 1, "received request...\n" );
 
-      retval = cchat_handle_req( &req, db );
+      retval = cchat_handle_req( &g_req, g_db );
       if( RETVAL_ALLOC == retval ) {
          /* Can't fix that. */
          goto cleanup;
@@ -128,21 +161,7 @@ cleanup:
    bcgi_cleanup_bstr( g_recaptcha_site_key, likely );
    bcgi_cleanup_bstr( g_recaptcha_secret_key, likely );
 
-   if( 0 <= cgi_sock ) {
-      FCGX_Free( &req, cgi_sock );
-   }
-
-   if( NULL != db ) {
-      chatdb_close( &db );
-   }
-
-#ifdef USE_WEBSOCKETS
-   socksrv_stop();
-#endif /* USE_WEBSOCKETS */
-
-   curl_global_cleanup();
-
-   dbglog_shutdown();
+   main_shutdown( 0 );
 
    return retval;
 }
