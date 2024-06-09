@@ -7,8 +7,6 @@
 #include <unistd.h>
 #include <pthread.h>
 
-#include <openssl/sha.h>
-
 static pthread_t g_server_thd = 0;
 static struct SOCKSRV_SERVER g_socksrv_srv;
 
@@ -105,8 +103,6 @@ int _socksrv_client_handshake( struct SOCKSRV_SERVER* srv, bstring buffer ) {
    struct tagbstring bs_secsoc = bsStatic( "Sec-WebSocket-Key" );
    bstring secsoc = NULL;
    size_t i = 0;
-   SHA_CTX hash_ctx;
-   unsigned char secsoc_reply_c[SHA_DIGEST_LENGTH];
    bstring secsoc_reply_hash = NULL;
    bstring secsoc_reply = NULL;
    size_t sent = 0;
@@ -132,31 +128,14 @@ int _socksrv_client_handshake( struct SOCKSRV_SERVER* srv, bstring buffer ) {
    dbglog_debug( 1, "security key return hash of plain: %s\n",
       bdata( secsoc ) );
 
-   /* Generate the hash. */
-   if( !SHA1_Init( &hash_ctx ) ) {
-      retval = RETVAL_SOCK;
-      goto cleanup;
-   }
-
-   if( !SHA1_Update(
-      &hash_ctx, (unsigned char*)bdata( secsoc ), blength( secsoc )
-   ) ) {
-      retval = RETVAL_SOCK;
-      goto cleanup;
-   }
-
-   if( !SHA1_Final( secsoc_reply_c, &hash_ctx ) ) {
-      retval = RETVAL_SOCK;
-      goto cleanup;
-   }
-
+   /* XXX */
+   /* bsecure_hash_sha( secsoc */
    /*
    retval = chatdb_b64_encode(
       secsoc_reply_c, SHA_DIGEST_LENGTH, &secsoc_reply_hash );
    if( retval ) {
       goto cleanup;
    }
-   */
 
    secsoc_reply = bformat(
       "HTTP/1.1 101 Switching Protocols\r\n"
@@ -168,6 +147,7 @@ int _socksrv_client_handshake( struct SOCKSRV_SERVER* srv, bstring buffer ) {
 
    sent = send(
       srv->client, bdata( secsoc_reply ), blength( secsoc_reply ), 0 );
+   */
 
    dbglog_debug( 1, "reply: %s", bdata( secsoc_reply ) );
 

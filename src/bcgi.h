@@ -72,6 +72,16 @@ int bcgi_html_escape( bstring in, bstring* out_p );
 
 int bcgi_query_key( struct bstrList* array, const char* key, bstring* val_p );
 
+int bcgi_b64_decode( bstring in, unsigned char** out_p, size_t* out_sz_p );
+
+int bcgi_b64_encode( unsigned char* in, size_t in_sz, bstring* out_p );
+
+int bcgi_hash_password(
+   bstring password, size_t password_iter, size_t hash_sz,
+   bstring salt, bstring* hash_out_p );
+
+int bcgi_generate_salt( bstring* out_p, size_t salt_sz );
+
 #ifdef BCGI_C
 
 #define CCHAT_HTML_ESC_TABLE_STR( str, esc, id ) bsStatic( str ),

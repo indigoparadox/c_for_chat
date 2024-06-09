@@ -437,7 +437,7 @@ int cchat_auth_user_cb(
 
    assert( NULL != password_test );
 
-   retval = chatdb_hash_password(
+   retval = bcgi_hash_password(
       password_test, iters, hash_sz, salt, &hash_test );
    if( retval ) {
       goto cleanup;

@@ -31,14 +31,6 @@ int chatdb_init( bstring path, sqlite3** db_p );
 
 void chatdb_close( sqlite3** db_p );
 
-int chatdb_b64_decode( bstring in, unsigned char** out_p, size_t* out_sz_p );
-
-int chatdb_b64_encode( unsigned char* in, size_t in_sz, bstring* out_p );
-
-int chatdb_hash_password(
-   bstring password, size_t password_iter, size_t hash_sz,
-   bstring salt, bstring* hash_out_p );
-
 int chatdb_add_user(
    sqlite3* db, int user_id, bstring user, bstring password, bstring email,
    bstring session_timeout, bstring* err_msg_p );

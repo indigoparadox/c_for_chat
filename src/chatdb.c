@@ -3,9 +3,6 @@
 
 #include <stdlib.h> /* for atoi() */
 
-#include <openssl/rand.h>
-#include <openssl/evp.h>
-
 #define CHATDB_HASH_SZ 32
 #define CHATDB_SESSION_HASH_SZ 32
 #define CHATDB_SALT_SZ 32
@@ -155,110 +152,6 @@ void chatdb_close( sqlite3** db_p ) {
 
 }
 
-int chatdb_b64_decode( bstring in, unsigned char** out_p, size_t* out_sz_p ) {
-   int retval = 0;
-   size_t decoded_sz = 0;
-
-   /* Base64-decode the salt. */
-   *out_sz_p = 3 * blength( in ) / 4;
-   *out_p = calloc( *out_sz_p, 1 );
-   if( NULL == *out_p ) {
-      dbglog_error( "could not allocate decoded str!\n" );
-      retval = RETVAL_ALLOC;
-      goto cleanup;
-   }
-
-   /* TODO: Buffer size limit? */
-   decoded_sz = EVP_DecodeBlock(
-      *out_p, (unsigned char*)bdata( in ), blength( in ) );
-   if( decoded_sz != *out_sz_p ) {
-      dbglog_error( "predicted sz: %lu but was: %lu\n",
-         *out_sz_p, decoded_sz );
-   }
-
-cleanup:
-
-   return retval;
-}
-
-int chatdb_b64_encode( unsigned char* in, size_t in_sz, bstring* out_p ) {
-   int retval = 0;
-   unsigned char* str = NULL;
-   size_t str_sz = 0;
-   size_t encoded_sz = 0;
-
-   /* Base64-encode the hash. */
-   str_sz = 4 * ((in_sz + 2) / 3);
-   str = calloc( str_sz + 1, 1 );
-   if( NULL == str ) {
-      dbglog_error( "could not allocate hash encoded str!\n" );
-      retval = RETVAL_ALLOC;
-      goto cleanup;
-   }
-
-   /* TODO: Buffer size limit? */
-   encoded_sz = EVP_EncodeBlock( str, in, in_sz );
-   if( encoded_sz != str_sz ) {
-      dbglog_error( "predicted hash sz: %lu but was: %lu\n",
-         str_sz, encoded_sz );
-   }
-
-   *out_p = bfromcstr( (char*)str );
-   if( NULL == *out_p ) {
-      dbglog_error( "could not allocate encoded bstring!\n" );
-      retval = RETVAL_ALLOC;
-      goto cleanup;
-   }
- 
-cleanup:
-
-   if( NULL != str ) {
-      free( str );
-   }
-
-   return retval;
-}
-
-int chatdb_hash_password(
-   bstring password, size_t password_iter, size_t hash_sz,
-   bstring salt, bstring* hash_out_p
-) {
-   unsigned char hash_bin[CHATDB_HASH_SZ] = { 0 };
-   size_t salt_bin_sz = 0;
-   int retval = 0;
-   unsigned char* salt_bin = NULL;
-
-   retval = chatdb_b64_decode( salt, &salt_bin, &salt_bin_sz );
-   if( retval ) {
-      goto cleanup;
-   }
-
-   /* Generate the hash. */
-   if( !PKCS5_PBKDF2_HMAC(
-      bdata( password ), blength( password ),
-      salt_bin, salt_bin_sz, password_iter, EVP_sha256(),
-      CHATDB_HASH_SZ, hash_bin )
-   ) {
-      dbglog_error( "error generating password hash!\n" );
-      retval = RETVAL_DB;
-      goto cleanup;
-   }
-
-   /* TODO: Push hash size in DB. */
-   retval = chatdb_b64_encode( hash_bin, CHATDB_HASH_SZ, hash_out_p );
-   if( retval ) {
-      goto cleanup;
-   }
-
-cleanup:
-
-   if( NULL != salt_bin ) {
-      free( salt_bin );
-   }
-
-   return retval;
-}
-
 int chatdb_add_user(
    sqlite3* db, int user_id, bstring user, bstring password, bstring email,
    bstring session_timeout, bstring* err_msg_p
@@ -267,7 +160,6 @@ int chatdb_add_user(
    char* query = NULL;
    char* err_msg = NULL;
    unsigned char* salt_str = NULL;
-   unsigned char salt_bin[CHATDB_SALT_SZ] = { 0 };
    bstring hash = NULL;
    bstring salt = NULL;
 
@@ -286,19 +178,10 @@ int chatdb_add_user(
    if( 0 > user_id || 0 < blength( password ) ) {
    
       /* Generate a new salt. */
-      if( 1 != RAND_bytes( salt_bin, CHATDB_SALT_SZ ) ) {
-         dbglog_error( "error generating random bytes!\n" );
-         retval = RETVAL_DB;
-         goto cleanup;
-      }
-
-      retval = chatdb_b64_encode( salt_bin, CHATDB_SALT_SZ, &salt );
-      if( retval ) {
-         goto cleanup;
-      }
+      retval = bcgi_generate_salt( &salt, CHATDB_SALT_SZ );
 
       /* Hash the provided password. */
-      retval = chatdb_hash_password(
+      retval = bcgi_hash_password(
          password, CHATDB_PASSWORD_ITER, CHATDB_HASH_SZ, salt, &hash );
       if( retval ) {
          goto cleanup;
@@ -649,16 +532,8 @@ int chatdb_add_session(
    int retval = 0;
    char* query = NULL;
    char* err_msg = NULL;
-   unsigned char hash_bin[CHATDB_SESSION_HASH_SZ] = { 0 };
 
-   /* Generate a new salt. */
-   if( 1 != RAND_bytes( hash_bin, CHATDB_SESSION_HASH_SZ ) ) {
-      dbglog_error( "error generating random bytes!\n" );
-      retval = RETVAL_DB;
-      goto cleanup;
-   }
-
-   retval = chatdb_b64_encode( hash_bin, CHATDB_SESSION_HASH_SZ, hash_p );
+   retval = bcgi_generate_salt( hash_p, CHATDB_SALT_SZ );
    if( retval ) {
       goto cleanup;
    }
