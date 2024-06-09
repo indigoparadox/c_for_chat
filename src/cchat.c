@@ -708,7 +708,8 @@ int cchat_route_chat(
 
       /* Invalid user; redirect to login. */
       FCGX_FPrintF( req->out, "Status: 303 See Other\r\n" );
-      FCGX_FPrintF( req->out, "Location: /login\r\n" );
+      FCGX_FPrintF( req->out,
+         "Location: /login?error=Invalid session cookie!\r\n" );
       FCGX_FPrintF( req->out, "Cache-Control: no-cache\r\n" );
       FCGX_FPrintF( req->out, "\r\n" );
       goto cleanup;
@@ -911,6 +912,7 @@ int cchat_handle_req( FCGX_Request* req, sqlite3* db ) {
    }
 
    remote_host = bfromcstr( FCGX_GetParam( "REMOTE_ADDR", req->envp ) );
+   dbglog_debug( 1, "remote host: %s\n", bdata( remote_host ) );
 
    /* Figure out our request method and consequent action. */
    req_method = bfromcstr( FCGX_GetParam( "REQUEST_METHOD", req->envp ) );
