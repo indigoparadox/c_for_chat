@@ -27,6 +27,7 @@ struct CHATDB_ARG {
    bstring password_test;
    int* user_id_out_p;
    FCGX_Request* req;
+   int* session_timeout_p;
 };
 
 int chatdb_init( bstring path, sqlite3** db_p ) {
@@ -260,7 +261,7 @@ cleanup:
 
 int chatdb_add_user(
    sqlite3* db, int user_id, bstring user, bstring password, bstring email,
-   bstring* err_msg_p
+   bstring session_timeout, bstring* err_msg_p
 ) {
    int retval = 0;
    char* query = NULL;
@@ -309,10 +310,10 @@ int chatdb_add_user(
       /* Generate an "add user" query. */
       query = sqlite3_mprintf(
          "insert into users "
-         "(user_name, email, hash, hash_sz, salt, iters) "
-         "values('%q', '%q', '%q', '%d', '%q', '%d')",
+         "(user_name, email, hash, hash_sz, salt, iters, session_timeout) "
+         "values('%q', '%q', '%q', '%d', '%q', '%d', '%q')",
          bdata( user ), bdata( email ), bdata( hash ), CHATDB_HASH_SZ,
-         bdata( salt ), CHATDB_PASSWORD_ITER );
+         bdata( salt ), CHATDB_PASSWORD_ITER, bdata( session_timeout ) );
 
       dbglog_debug( 1, "attempting to add user %s...\n", bdata( user ) );
    } else {
@@ -321,9 +322,10 @@ int chatdb_add_user(
       query = sqlite3_mprintf(
          "update users set "
             "user_name = '%q', "
-            "email = '%q' "
+            "email = '%q', "
+            "session_timeout = '%q' "
             "where user_id = '%d'",
-         bdata( user ), bdata( email ), user_id );
+         bdata( user ), bdata( email ), bdata( session_timeout ), user_id );
 
       dbglog_debug( 1, "updating user %d...\n", user_id );
    }
@@ -497,7 +499,7 @@ int chatdb_dbcb_users( void* arg, int argc, char** argv, char **col ) {
    bstring hash = NULL;
    bstring salt = NULL;
 
-   if( 7 > argc ) {
+   if( 8 > argc ) {
       dbglog_error( "incorrect number of user fields!\n" );
       retval = 1;
       goto cleanup;
@@ -536,6 +538,7 @@ int chatdb_dbcb_users( void* arg, int argc, char** argv, char **col ) {
       arg_struct->req,
       arg_struct->password_test,
       arg_struct->user_id_out_p,
+      arg_struct->session_timeout_p,
       atoi( argv[0] ), /* user_id */
       user_name, /* user_name */
       email, /* email */
@@ -543,7 +546,8 @@ int chatdb_dbcb_users( void* arg, int argc, char** argv, char **col ) {
       atoi( argv[4] ),
       salt, /* salt */
       atoi( argv[6] ), /* iters */
-      atoi( argv[7] ) ); /* join_time */
+      atoi( argv[7] ), /* join_time */
+      atoi( argv[8] ) ); /* session_timeout */
 
 cleanup:
 
@@ -569,7 +573,7 @@ cleanup:
 int chatdb_iter_users(
    struct WEBUTIL_PAGE* page, sqlite3* db, FCGX_Request* req,
    bstring user_name, int user_id, bstring password_test, int* user_id_out_p,
-   chatdb_iter_user_cb_t cb, bstring* err_msg_p
+   int* session_timeout_p, chatdb_iter_user_cb_t cb, bstring* err_msg_p
 ) {
    int retval = 0;
    char* err_msg = NULL;
@@ -582,23 +586,26 @@ int chatdb_iter_users(
    arg_struct.password_test = password_test;
    arg_struct.user_id_out_p = user_id_out_p;
    arg_struct.req = req;
+   arg_struct.session_timeout_p = session_timeout_p;
 
    if( NULL != user_name ) {
       assert( 0 > user_id );
       dyn_query = sqlite3_mprintf(
          "select user_id, user_name, email, hash, hash_sz, salt, iters, "
-            "strftime('%%s', join_time) from users where user_name = '%q'",
+            "strftime('%%s', join_time), session_timeout "
+            "from users where user_name = '%q'",
          bdata( user_name ) );
       query = dyn_query;
    } else if( 0 <= user_id ) {
       dyn_query = sqlite3_mprintf(
          "select user_id, user_name, email, hash, hash_sz, salt, iters, "
-            "strftime('%%s', join_time) from users where user_id = %d",
+            "strftime('%%s', join_time), session_timeout "
+            "from users where user_id = %d",
          user_id );
       query = dyn_query;
    } else {
       query = "select user_id, user_name, email, hash, hash_sz, salt, iters, "
-         "strftime('%s', join_time) from users";
+         "strftime('%s', join_time), session_timeout from users";
    }
 
    if( NULL == query ) {

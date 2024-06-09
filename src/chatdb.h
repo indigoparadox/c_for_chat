@@ -18,9 +18,10 @@ typedef int (*chatdb_iter_msg_cb_t)(
 
 typedef int (*chatdb_iter_user_cb_t)(
    struct WEBUTIL_PAGE* page, FCGX_Request* req,
-   bstring password_test, int* user_id_out_p,
+   bstring password_test, int* user_id_out_p, int* session_timeout_p,
    int user_id, bstring user_name, bstring email,
-   bstring hash, size_t hash_sz, bstring salt, size_t iters, time_t msg_time );
+   bstring hash, size_t hash_sz, bstring salt, size_t iters, time_t msg_time,
+   int session_timeout );
 
 typedef int (*chatdb_iter_session_cb_t)(
    struct WEBUTIL_PAGE* page, int* user_id_out_p, int session_id, int user_id,
@@ -40,7 +41,7 @@ int chatdb_hash_password(
 
 int chatdb_add_user(
    sqlite3* db, int user_id, bstring user, bstring password, bstring email,
-   bstring* err_msg_p );
+   bstring session_timeout, bstring* err_msg_p );
 
 int chatdb_send_message(
    sqlite3* db, int user_id, bstring msg, bstring* err_msg_p );
@@ -52,7 +53,7 @@ int chatdb_iter_messages(
 int chatdb_iter_users(
    struct WEBUTIL_PAGE* page, sqlite3* db, FCGX_Request* req,
    bstring user_name, int user_id, bstring password_test, int* user_id_out_p,
-   chatdb_iter_user_cb_t cb, bstring* err_msg_p );
+   int* session_timeout_p, chatdb_iter_user_cb_t cb, bstring* err_msg_p );
 
 int chatdb_add_session(
    sqlite3* db, int user_id, bstring remote_host, bstring* hash_p,

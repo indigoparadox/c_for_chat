@@ -66,7 +66,8 @@ int cchat_route_logout(
 }
 
 static int cchat_profile_form(
-   struct WEBUTIL_PAGE* page, bstring user_name, bstring email, bstring session
+   struct WEBUTIL_PAGE* page, bstring user_name, bstring email, bstring session,
+   int session_timeout
 ) {
    int retval = 0;
 
@@ -89,8 +90,13 @@ static int cchat_profile_form(
          "<div class=\"profile-field\">"
             "<label for=\"password2\">Confirm password: </label>"
             "<input type=\"password\" id=\"password2\" name=\"password2\" />"
+               "</div>\n"
+         "<div class=\"profile-field\">"
+            "<label for=\"session_timeout\">Session timeout: </label>"
+            "<input type=\"text\" id=\"session_timeout\" "
+               "name=\"session_timeout\" value=\"%d\" />"
                "</div>\n",
-      bdata( user_name ), bdata( email )
+      bdata( user_name ), bdata( email ), session_timeout
    );
 
    if( BSTR_ERR == retval ) {
@@ -146,9 +152,10 @@ cleanup:
 
 int cchat_profile_user_cb(
    struct WEBUTIL_PAGE* page, FCGX_Request* req,
-   bstring password_test, int* user_id_out_p,
+   bstring password_test, int* user_id_out_p, int* session_timeout_p,
    int user_id, bstring user_name, bstring email,
-   bstring hash, size_t hash_sz, bstring salt, size_t iters, time_t msg_time
+   bstring hash, size_t hash_sz, bstring salt, size_t iters, time_t msg_time,
+   int session_timeout
 ) {
    int retval = 0;
    bstring session = NULL;
@@ -171,7 +178,8 @@ int cchat_profile_user_cb(
       goto cleanup;
    }
 
-   retval = cchat_profile_form( page, user_name, email, session );
+   retval = cchat_profile_form(
+      page, user_name, email, session, session_timeout );
 
 cleanup:
 
@@ -211,13 +219,14 @@ int cchat_route_profile(
    if( 0 <= auth_user_id ) {
       /* Edit an existing user. */
       retval = chatdb_iter_users(
-         &page, db, req, NULL, auth_user_id,
+         &page, db, req, NULL, auth_user_id, NULL,
          NULL, NULL, cchat_profile_user_cb, NULL );
       if( retval ) {
          goto cleanup;
       }
    } else {
-      retval = cchat_profile_form( &page, &empty_string, &empty_string, NULL );
+      retval = cchat_profile_form(
+         &page, &empty_string, &empty_string, NULL, 3600 );
    }
 
    retval = webutil_show_page( req, q, p, &page );
@@ -250,6 +259,8 @@ int cchat_route_user(
    bstring csrf_decode = NULL;
    bstring recaptcha = NULL;
    bstring recaptcha_decode = NULL;
+   bstring session_timeout = NULL;
+   bstring session_timeout_decode = NULL;
 
    dbglog_debug( 1, "route: user\n" );
 
@@ -305,6 +316,7 @@ int cchat_route_user(
    cchat_decode_field( p, password1 );
    cchat_decode_field( p, password2 );
    cchat_decode_field( p, email );
+   cchat_decode_field( p, session_timeout );
 
    if( 0 != bstrcmp( password1, password2 ) ) {
       dbglog_error( "password fields do not match!\n" );
@@ -316,7 +328,8 @@ int cchat_route_user(
    dbglog_debug( 1, "adding user: %s\n", bdata( user ) );
 
    retval = chatdb_add_user(
-      db, auth_user_id, user_decode, password1_decode, email_decode, &err_msg );
+      db, auth_user_id, user_decode, password1_decode, email_decode,
+      session_timeout_decode, &err_msg );
 
 cleanup:
 
@@ -333,6 +346,8 @@ cleanup:
    FCGX_FPrintF( req->out, "Cache-Control: no-cache\r\n" );
    FCGX_FPrintF( req->out, "\r\n" ); 
 
+   bcgi_cleanup_bstr( session_timeout, likely );
+   bcgi_cleanup_bstr( session_timeout_decode, likely );
    bcgi_cleanup_bstr( recaptcha, likely );
    bcgi_cleanup_bstr( recaptcha_decode, likely );
    bcgi_cleanup_bstr( csrf, likely );
@@ -412,9 +427,10 @@ cleanup:
 
 int cchat_auth_user_cb(
    struct WEBUTIL_PAGE* page, FCGX_Request* req,
-   bstring password_test, int* user_id_out_p,
+   bstring password_test, int* user_id_out_p, int* session_timeout_p,
    int user_id, bstring user_name, bstring email,
-   bstring hash, size_t hash_sz, bstring salt, size_t iters, time_t msg_time
+   bstring hash, size_t hash_sz, bstring salt, size_t iters, time_t msg_time,
+   int session_timeout
 ) {
    int retval = 0;
    bstring hash_test = NULL;
@@ -437,6 +453,7 @@ int cchat_auth_user_cb(
 
    /* Return this user as their password matches. */
    *user_id_out_p = user_id;
+   *session_timeout_p = session_timeout;
 
 cleanup:
 
@@ -462,6 +479,7 @@ int cchat_route_auth(
    int user_id = -1;
    bstring recaptcha = NULL;
    bstring recaptcha_decode = NULL;
+   int session_timeout = 0;
 
    dbglog_debug( 1, "route: auth\n" );
 
@@ -495,7 +513,7 @@ int cchat_route_auth(
    /* Validate username and password. */
    retval = chatdb_iter_users(
       NULL, db, req, user_decode, -1, password_decode, &user_id,
-      cchat_auth_user_cb, &err_msg );
+      &session_timeout, cchat_auth_user_cb, &err_msg );
    if( retval || 0 > user_id ) {
       if( NULL != err_msg ) {
          retval = bassigncstr( err_msg, "Invalid username or password!" );
@@ -518,8 +536,8 @@ int cchat_route_auth(
    dbglog_debug( 2, "setting authorized session cookie: %s\n", bdata( hash ) );
 
    /* Set auth cookie. */
-   FCGX_FPrintF( req->out, "Set-Cookie: session=%s; Max-Age=3600; HttpOnly\r\n",
-      bdata( hash ) );
+   FCGX_FPrintF( req->out, "Set-Cookie: session=%s; Max-Age=%d; HttpOnly\r\n",
+      bdata( hash ), session_timeout );
 
 cleanup:
 
