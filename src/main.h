@@ -17,6 +17,7 @@
 #include "cchat.h"
 #include "chatdb.h"
 #include "dbglog.h"
+#include "socksrv.h"
 
 #endif /* !MAIN_H */
 

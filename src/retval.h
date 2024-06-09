@@ -8,6 +8,7 @@
 #define RETVAL_ALLOC    0x08
 #define RETVAL_FILE     0x10
 #define RETVAL_AUTH     0x20
+#define RETVAL_SOCK     0x40
 
 #endif /* !RETVAL_H */
 

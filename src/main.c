@@ -70,7 +70,7 @@ int main( int argc, char* argv[] ) {
       bcgi_check_null( server_listen );
    }
 
-   dbglog_debug( 2, "checking environment...\n" );
+   dbglog_debug( 3, "checking environment...\n" );
    g_recaptcha_site_key = bfromcstr( getenv( "CCHAT_RECAPTCHA_SITE" ) );
    if( NULL == g_recaptcha_site_key ) {
       dbglog_debug( 1, "no ReCAPTCHA site key defined...\n" );
@@ -80,23 +80,31 @@ int main( int argc, char* argv[] ) {
       dbglog_debug( 1, "no ReCAPTCHA secret key defined...\n" );
    }
 
-   dbglog_debug( 2, "initializing curl...\n" );
+   dbglog_debug( 3, "initializing curl...\n" );
 
    curl_global_init( CURL_GLOBAL_ALL );
 
-   dbglog_debug( 2, "initializing database...\n" );
+   dbglog_debug( 3, "initializing database...\n" );
 
    retval = chatdb_init( &chatdb_path, &db );
    if( retval ) {
       goto cleanup;
    }
 
-   dbglog_debug( 2, "initializing FastCGI...\n" );
+   dbglog_debug( 3, "initializing FastCGI...\n" );
 
    FCGX_Init();
    memset( &req, 0, sizeof( FCGX_Request ) );
 
-   dbglog_debug( 3, "listening on %s...\n", bdata( server_listen ) );
+#ifdef USE_WEBSOCKETS
+   dbglog_debug( 3, "starting socket server...\n" );
+   retval = socksrv_listen();
+   if( retval ) {
+      goto cleanup;
+   }
+#endif /* USE_WEBSOCKETS */
+
+   dbglog_debug( 4, "listening on %s...\n", bdata( server_listen ) );
 
    cgi_sock = FCGX_OpenSocket( bdata( server_listen ), 100 );
    FCGX_InitRequest( &req, cgi_sock, 0 );
@@ -127,6 +135,10 @@ cleanup:
    if( NULL != db ) {
       chatdb_close( &db );
    }
+
+#ifdef USE_WEBSOCKETS
+   socksrv_stop();
+#endif /* USE_WEBSOCKETS */
 
    curl_global_cleanup();
 
