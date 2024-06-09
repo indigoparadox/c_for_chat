@@ -717,15 +717,17 @@ int cchat_route_chat(
    page.text = bfromcstr( "" );
    bcgi_check_null( page.text );
 
-   bcgi_query_key( q, "mini", &mini );
+#ifdef USE_WEBSOCKETS
 
-#if 0
    /* Add refresher/convenience script. */
    retval = webutil_add_script( &page,
       "<script src=\"https://code.jquery.com/jquery-2.2.4.min.js\" integrity=\"sha256-BbhdlvQf/xTY9gja0Dq3HiwQF8LaCRTXxZKRutelT44=\" crossorigin=\"anonymous\"></script>\n" );
    retval = webutil_add_script( &page,
       "<script type=\"text/javascript\" src=\"chat.js\"></script>\n" );
-#endif
+
+#else
+
+   bcgi_query_key( q, "mini", &mini );
 
    if( NULL == mini ) {
       page.flags |= WEBUTIL_PAGE_FLAG_NOBODY;
@@ -752,6 +754,7 @@ int cchat_route_chat(
       /* Add auto-refresh. */
       retval = webutil_add_script( &page,
          "<meta http-equiv=\"refresh\" content=\"2\" />\n" );
+#endif /* !USE_WEBSOCKETS */
 
       retval = bcatcstr( page.text, "<table class=\"chat-messages\">\n" );
       bcgi_check_bstr_err( page.text );
@@ -766,10 +769,12 @@ int cchat_route_chat(
       retval = bcatcstr( page.text, "</table>\n" );
       bcgi_check_bstr_err( page.text );
 
+#ifndef USE_WEBSOCKETS
    } else if( biseqcaselessStatic( mini, "bottom" ) ) {
       /* Remove page decorations. */
       page.flags |= WEBUTIL_PAGE_FLAG_NOTITLE;
       page.flags |= WEBUTIL_PAGE_FLAG_NONAV;
+#endif /* !USE_WEBSOCKETS */
 
       /* See if a valid session exists (don't urldecode!). */
       retval = bcgi_query_key( c, "session", &session );
@@ -791,7 +796,9 @@ int cchat_route_chat(
          "</div>\n",
          bdata( session ) );
       bcgi_check_bstr_err( page.text );
+#ifndef USE_WEBSOCKETS
    }
+#endif /* !USE_WEBSOCKETS */
 
    retval = webutil_show_page( req, q, p, &page );
 
