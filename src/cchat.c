@@ -282,8 +282,15 @@ int cchat_route_user(
       }
    }
 
-   cchat_decode_field_rename( p, recaptcha, g-recaptcha-response );
-   if( NULL != recaptcha_decode ) {
+   /* Grab recaptcha validation string if applicable. */
+   bcgi_query_key( p, "g-recaptcha-response", &recaptcha );
+   if( NULL != recaptcha ) {
+      retval = bcgi_urldecode( recaptcha, &recaptcha_decode );
+      if( retval ) {
+         goto cleanup;
+      }
+      assert( NULL != recaptcha_decode );
+
       retval = webutil_check_recaptcha( req, recaptcha_decode );
       if( retval ) {
          assert( NULL == err_msg );
@@ -463,9 +470,15 @@ int cchat_route_auth(
       goto cleanup;
    }
 
-   /* Validate recaptcha. */
-   cchat_decode_field_rename( p, recaptcha, g-recaptcha-response );
-   if( NULL != recaptcha_decode ) {
+   /* Grab recaptcha validation string if applicable. */
+   bcgi_query_key( p, "g-recaptcha-response", &recaptcha );
+   if( NULL != recaptcha ) {
+      retval = bcgi_urldecode( recaptcha, &recaptcha_decode );
+      if( retval ) {
+         goto cleanup;
+      }
+      assert( NULL != recaptcha_decode );
+
       retval = webutil_check_recaptcha( req, recaptcha_decode );
       if( retval ) {
          assert( NULL == err_msg );
