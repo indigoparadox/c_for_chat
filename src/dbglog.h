@@ -11,17 +11,22 @@ void dbglog_shutdown(); */
 #define _dbglog_fmt( lvl, file, line ) "(" #lvl ") " file ": " _ds( line ) ": "
 
 #define dbglog_debug( lvl, ... ) \
-   assert( NULL != g_dbglog_file ); \
-   fprintf( \
-      g_dbglog_file, _dbglog_fmt( lvl, __FILE__, __LINE__ ) __VA_ARGS__ ); \
-   fflush( g_dbglog_file );
+   if( NULL != g_dbglog_file && lvl >= g_dbglog_level ) { \
+      fprintf( \
+         g_dbglog_file, _dbglog_fmt( lvl, __FILE__, __LINE__ ) __VA_ARGS__ ); \
+      fflush( g_dbglog_file ); \
+   }
 
 #define dbglog_error( ... ) \
-   assert( NULL != g_dbglog_file ); \
-   fprintf( g_dbglog_file, _dbglog_fmt( E, __FILE__, __LINE__ ) __VA_ARGS__ ); \
-   fflush( g_dbglog_file );
+   if( NULL != g_dbglog_file ) { \
+      fprintf( g_dbglog_file, \
+         _dbglog_fmt( E, __FILE__, __LINE__ ) __VA_ARGS__ ); \
+      fflush( g_dbglog_file ); \
+   }
 
 #ifdef DBGLOG_C
+
+int g_dbglog_level = 9;
 
 FILE* g_dbglog_file = NULL;
 
@@ -41,6 +46,8 @@ static void dbglog_shutdown() {
 }
 
 #else
+
+extern int g_dbglog_level;
 
 extern FILE* g_dbglog_file;
 
