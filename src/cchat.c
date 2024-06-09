@@ -867,11 +867,25 @@ int cchat_handle_req( FCGX_Request* req, sqlite3* db ) {
    struct bstrList* req_cookie_list = NULL;
    int auth_user_id = -1;
 
+   if( 1 >= g_dbglog_level ) {
+      while( NULL != req->envp[i] ) {
+         dbglog_debug( 1, "envp: %s\n", req->envp[i] );
+         i++;
+      }
+      i = 0;
+   }
+
    /* Figure out our request method and consequent action. */
    req_method = bfromcstr( FCGX_GetParam( "REQUEST_METHOD", req->envp ) );
+   if( NULL == req_method ) {
+      req_method = bfromcstr( getenv( "REQUEST_METHOD" ) );
+   }
    bcgi_check_null( req_method );
 
    req_uri_raw = bfromcstr( FCGX_GetParam( "DOCUMENT_URI", req->envp ) );
+   if( NULL == req_uri_raw ) {
+      req_uri_raw = bfromcstr( getenv( "DOCUMENT_URI" ) );
+   }
    bcgi_check_null( req_uri_raw );
 
    /* Get query string and split into list. */
