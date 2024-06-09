@@ -413,7 +413,6 @@ int cchat_auth_user_cb(
    bstring hash_test = NULL;
 
    assert( NULL != password_test );
-   dbglog_error( "test: %s\n", bdata( password_test ) );
 
    retval = chatdb_hash_password(
       password_test, iters, hash_sz, salt, &hash_test );
@@ -877,14 +876,11 @@ int cchat_handle_req( FCGX_Request* req, sqlite3* db ) {
 
    /* Figure out our request method and consequent action. */
    req_method = bfromcstr( FCGX_GetParam( "REQUEST_METHOD", req->envp ) );
-   if( NULL == req_method ) {
-      req_method = bfromcstr( getenv( "REQUEST_METHOD" ) );
-   }
    bcgi_check_null( req_method );
 
    req_uri_raw = bfromcstr( FCGX_GetParam( "DOCUMENT_URI", req->envp ) );
    if( NULL == req_uri_raw ) {
-      req_uri_raw = bfromcstr( getenv( "DOCUMENT_URI" ) );
+      req_uri_raw = bfromcstr( FCGX_GetParam( "REQUEST_URI", req->envp ) );
    }
    bcgi_check_null( req_uri_raw );
 

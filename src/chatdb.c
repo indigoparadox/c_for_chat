@@ -239,8 +239,6 @@ int chatdb_add_user(
       goto cleanup;
    }
 
-   dbglog_error( "%d\n", user_id );
-
    if( 0 > user_id && 0 == blength( password ) ) {
       *err_msg_p = bfromcstr( "New password cannot be empty!" );
       retval = RETVAL_PARAMS;
