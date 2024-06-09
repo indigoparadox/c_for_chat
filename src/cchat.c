@@ -891,11 +891,13 @@ int cchat_handle_req( FCGX_Request* req, sqlite3* db ) {
    req_method = bfromcstr( FCGX_GetParam( "REQUEST_METHOD", req->envp ) );
    bcgi_check_null( req_method );
 
-   req_uri_raw = bfromcstr( FCGX_GetParam( "DOCUMENT_URI", req->envp ) );
-   if( NULL == req_uri_raw ) {
-      req_uri_raw = bfromcstr( FCGX_GetParam( "REQUEST_URI", req->envp ) );
-   }
+   req_uri_raw = bfromcstr( FCGX_GetParam( "REQUEST_URI", req->envp ) );
    bcgi_check_null( req_uri_raw );
+
+   if( BSTR_ERR != bstrchr( req_uri_raw, '?' ) ) {
+      retval = btrunc( req_uri_raw, bstrchr( req_uri_raw, '?' ) );
+      bcgi_check_bstr_err( req_uri_raw );
+   }
 
    /* Get query string and split into list. */
    req_query = bfromcstr( FCGX_GetParam( "QUERY_STRING", req->envp ) );
