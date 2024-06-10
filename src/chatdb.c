@@ -16,21 +16,38 @@
       goto cleanup; \
    }
 
+#define CHATDB_USER_TABLE_DB_FIELDS( idx, field, c_type, db_type ) \
+   static const struct tagbstring \
+      _chatdb_field_users_ ## field = bsStatic( #field " " db_type );
+
+CHATDB_USER_TABLE( CHATDB_USER_TABLE_DB_FIELDS );
+
+#define CHATDB_USER_TABLE_DB_FIELDS_LIST( idx, field, c_type, db_type ) \
+   &_chatdb_field_users_ ## field,
+
+static const struct bstrList _gc_chatdb_fields_users = {
+   9, 9,
+   {
+      CHATDB_USER_TABLE( CHATDB_USER_TABLE_DB_FIELDS_LIST )
+   }
+};
+
 struct CHATDB_ARG {
    chatdb_iter_msg_cb_t cb_msg;
    chatdb_iter_user_cb_t cb_user;
    chatdb_iter_session_cb_t cb_session;
    struct WEBUTIL_PAGE* page;
    bstring password_test;
-   int* user_id_out_p;
    struct CCHAT_OP_DATA* op;
-   int* session_timeout_p;
+   int* user_id_out_p;
+   struct CHATDB_USER* user;
 };
 
 int chatdb_init( bstring path, struct CCHAT_OP_DATA* op ) {
    int retval = 0;
    char* err_msg = NULL;
    union CHATDB_OPTION_VAL schema_ver;
+   bstring query = NULL;
 
    retval = sqlite3_open( bdata( path ), &(op->db) );
    if( SQLITE_OK != retval ) {
@@ -59,19 +76,25 @@ int chatdb_init( bstring path, struct CCHAT_OP_DATA* op ) {
       goto cleanup;
    }
 
+#if 0
+   #define CHATDB_USER_TABLE_DB_FIELDS( idx, field, c_type, db_type ) \
+      #field " " db_type ", "
+
+   dbglog_debug( 1, "create table if not exists users( "
+         CHATDB_USER_TABLE( CHATDB_USER_TABLE_DB_FIELDS )
+         ");\n" );
+#endif
+
+   query = bjoinStatic( &_gc_chatdb_fields_users, "," );
+   bcgi_check_null( query );
+
+   dbglog_debug( 1, "%s\n", bdata( query ) );
+   
+   exit( 1 );
+
    /* Create user table if it doesn't exist. */
    pthread_mutex_lock( &(op->db_mutex) );
-   retval = sqlite3_exec( op->db,
-      "create table if not exists users( "
-         "user_id integer primary key, "
-         "user_name text not null unique, "
-         "email text, "
-         "hash text not null, "
-         "hash_sz integer not null, "
-         "salt text not null, "
-         "iters integer not null, "
-         "join_time datetime default current_timestamp, "
-         "session_timeout default 3600 );", NULL, 0, &err_msg );
+   retval = sqlite3_exec( op->db, bdata( query ), NULL, 0, &err_msg );
    pthread_mutex_unlock( &(op->db_mutex) );
    if( SQLITE_OK != retval ) {
       dbglog_error( "could not create database user table: %s\n", err_msg );
@@ -153,6 +176,8 @@ int chatdb_init( bstring path, struct CCHAT_OP_DATA* op ) {
    retval = 0;
 
 cleanup:
+
+   bcgi_cleanup_bstr( query, likely );
 
    return retval;
 }
@@ -391,13 +416,51 @@ cleanup:
 }
 
 static
+int chatdb_assign_time_t( time_t* out_p, const char* in ) {
+   int retval = 0;
+   struct tm ts;
+   char buffer[101];
+
+   memset( buffer, '\0', 101 );
+
+   strptime( in, "%Y-%m-%d%t%H:%M:%S", &ts );
+   strftime( buffer, 100, "%s", &ts );
+   /* TODO: Don't use atoi() for this! */
+   *out_p = atol( buffer );
+
+   return retval;
+}
+
+static
+int chatdb_assign_int( int* out_p, const char* in ) {
+   int retval = 0;
+
+   *out_p = atoi( in );
+
+   return retval;
+}
+
+static
+int chatdb_assign_bstring( bstring* out_p, const char* in ) {
+   int retval = 0;
+
+   if( NULL != *out_p ) {
+      retval = bassigncstr( *out_p, in );
+      bcgi_check_bstr_err( *out_p );
+   } else {
+      *out_p = bfromcstr( in );
+      bcgi_check_null( *out_p );
+   }
+
+cleanup:
+
+   return retval;
+}
+
+static
 int chatdb_dbcb_users( void* arg, int argc, char** argv, char **col ) {
    struct CHATDB_ARG* arg_struct = (struct CHATDB_ARG*)arg;
    int retval = 0;
-   bstring user_name = NULL;
-   bstring email = NULL;
-   bstring hash = NULL;
-   bstring salt = NULL;
 
    if( 8 > argc ) {
       dbglog_error( "incorrect number of user fields!\n" );
@@ -405,6 +468,12 @@ int chatdb_dbcb_users( void* arg, int argc, char** argv, char **col ) {
       goto cleanup;
    }
 
+   #define CHATDB_USER_TABLE_ASSIGN( idx, field, c_type, db_type ) \
+      chatdb_assign_ ## c_type ( &(arg_struct->user->field), argv[idx] );
+
+   CHATDB_USER_TABLE( CHATDB_USER_TABLE_ASSIGN );
+
+#if 0
    user_name = bfromcstr( argv[1] );
    if( NULL == user_name ) { 
       dbglog_error( "error allocating user_name!\n" );
@@ -426,31 +495,24 @@ int chatdb_dbcb_users( void* arg, int argc, char** argv, char **col ) {
       goto cleanup;
    }
 
-   salt = bfromcstr( argv[5] );
-   if( NULL == salt ) { 
-      dbglog_error( "error allocating salt!\n" );
-      retval = RETVAL_ALLOC;
-      goto cleanup;
-   }
+   assert( NULL == arg_struct->user->hash );
+   arg_struct->user->salt = bfromcstr( argv[5] );
+   bcgi_check_null( arg_struct->user->salt );
+
+   assert( NULL == arg_struct->user->salt );
+   arg_struct->user->salt = bfromcstr( argv[5] );
+   bcgi_check_null( arg_struct->user->salt );
+#endif
 
    retval = arg_struct->cb_user(
       arg_struct->page,
       arg_struct->op,
       arg_struct->password_test,
-      arg_struct->user_id_out_p,
-      arg_struct->session_timeout_p,
-      atoi( argv[0] ), /* user_id */
-      user_name, /* user_name */
-      email, /* email */
-      hash, /* hash */
-      atoi( argv[4] ),
-      salt, /* salt */
-      atoi( argv[6] ), /* iters */
-      atoi( argv[7] ), /* join_time */
-      atoi( argv[8] ) ); /* session_timeout */
+      arg_struct->user );
 
 cleanup:
 
+#if 0
    if( NULL != user_name ) {
       bdestroy( user_name );
    }
@@ -466,14 +528,14 @@ cleanup:
    if( NULL != salt ) {
       bdestroy( salt );
    }
+#endif
 
    return retval;
 }
 
 int chatdb_iter_users(
-   struct WEBUTIL_PAGE* page, struct CCHAT_OP_DATA* op,
-   bstring user_name, int user_id, bstring password_test, int* user_id_out_p,
-   int* session_timeout_p, chatdb_iter_user_cb_t cb, bstring* err_msg_p
+   struct WEBUTIL_PAGE* page, struct CCHAT_OP_DATA* op, bstring password_test,
+   struct CHATDB_USER* user, chatdb_iter_user_cb_t cb, bstring* err_msg_p
 ) {
    int retval = 0;
    char* err_msg = NULL;
@@ -483,29 +545,26 @@ int chatdb_iter_users(
 
    arg_struct.cb_user = cb;
    arg_struct.page = page;
+   arg_struct.user = user;
    arg_struct.password_test = password_test;
-   arg_struct.user_id_out_p = user_id_out_p;
    arg_struct.op = op;
-   arg_struct.session_timeout_p = session_timeout_p;
 
-   if( NULL != user_name ) {
-      assert( 0 > user_id );
+   #define CHATDB_USER_TABLE_SELECT( idx, field, c_type, db_type ) \
+      #field,
+
+   if( NULL != user->user_name ) {
+      assert( 0 > user->user_id );
       dyn_query = sqlite3_mprintf(
-         "select user_id, user_name, email, hash, hash_sz, salt, iters, "
-            "strftime('%%s', join_time), session_timeout "
-            "from users where user_name = '%q'",
-         bdata( user_name ) );
+         "select * from users where user_name = '%q'",
+         bdata( user->user_name ) );
       query = dyn_query;
-   } else if( 0 <= user_id ) {
+   } else if( 0 < user->user_id ) {
       dyn_query = sqlite3_mprintf(
-         "select user_id, user_name, email, hash, hash_sz, salt, iters, "
-            "strftime('%%s', join_time), session_timeout "
-            "from users where user_id = %d",
-         user_id );
+         "select * from users where user_id = %d",
+         user->user_id );
       query = dyn_query;
    } else {
-      query = "select user_id, user_name, email, hash, hash_sz, salt, iters, "
-         "strftime('%s', join_time), session_timeout from users";
+      query = "select * from users";
    }
 
    if( NULL == query ) {

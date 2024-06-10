@@ -2,6 +2,9 @@
 #ifndef MAIN_H
 #define MAIN_H
 
+#define _XOPEN_SOURCE 700
+#include <time.h>
+
 #include <stdio.h>
 #include <stdint.h>
 #include <assert.h>

@@ -7,6 +7,29 @@
 #define CHATDB_OPTION_FMT_INT 0
 #define CHATDB_OPTION_FMT_STR 1
 
+#define CHATDB_USER_TABLE( f ) \
+   f(  0, user_id,          int,     "integer primary key" ) \
+   f(  1, user_name,        bstring, "text not null unique" ) \
+   f(  2, email,            bstring, "text" ) \
+   f(  3, hash,             bstring, "text not null" ) \
+   f(  4, hash_sz,          int,     "integer not null" ) \
+   f(  5, salt,             bstring, "text not null" ) \
+   f(  6, iters,            int,     "integer not null" ) \
+   f(  7, join_time,        time_t,  "datetime default current_timestamp" ) \
+   f(  8, session_timeout,  int,     "default 3600" )
+
+#define chatdb_free_user( u ) \
+   bcgi_cleanup_bstr( (u)->user_name, likely ) \
+   bcgi_cleanup_bstr( (u)->email, likely ) \
+   bcgi_cleanup_bstr( (u)->hash, likely ) \
+   bcgi_cleanup_bstr( (u)->salt, likely )
+
+#define CHATDB_USER_TABLE_STRUCT( idx, field, c_type, db_type ) c_type field;
+
+struct CHATDB_USER {
+   CHATDB_USER_TABLE( CHATDB_USER_TABLE_STRUCT )
+};
+
 union CHATDB_OPTION_VAL {
    int integer;
    bstring str;
@@ -17,11 +40,8 @@ typedef int (*chatdb_iter_msg_cb_t)(
    int msg_id, int msg_type, bstring from, int to, bstring text, time_t msg_time );
 
 typedef int (*chatdb_iter_user_cb_t)(
-   struct WEBUTIL_PAGE* page, struct CCHAT_OP_DATA* op,
-   bstring password_test, int* user_id_out_p, int* session_timeout_p,
-   int user_id, bstring user_name, bstring email,
-   bstring hash, size_t hash_sz, bstring salt, size_t iters, time_t msg_time,
-   int session_timeout );
+   struct WEBUTIL_PAGE* page, struct CCHAT_OP_DATA* op, bstring password,
+   struct CHATDB_USER* user );
 
 typedef int (*chatdb_iter_session_cb_t)(
    struct WEBUTIL_PAGE* page, int* user_id_out_p, int session_id, int user_id,
@@ -43,9 +63,8 @@ int chatdb_iter_messages(
    int msg_type, int dest_id, chatdb_iter_msg_cb_t cb, bstring* err_msg_p);
 
 int chatdb_iter_users(
-   struct WEBUTIL_PAGE* page, struct CCHAT_OP_DATA* op,
-   bstring user_name, int user_id, bstring password_test, int* user_id_out_p,
-   int* session_timeout_p, chatdb_iter_user_cb_t cb, bstring* err_msg_p );
+   struct WEBUTIL_PAGE* page, struct CCHAT_OP_DATA* op, bstring password_test,
+   struct CHATDB_USER* user, chatdb_iter_user_cb_t cb, bstring* err_msg_p );
 
 int chatdb_add_session(
    struct CCHAT_OP_DATA* op, int user_id, bstring remote_host, bstring* hash_p,

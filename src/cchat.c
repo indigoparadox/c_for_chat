@@ -152,10 +152,7 @@ cleanup:
 
 int cchat_profile_user_cb(
    struct WEBUTIL_PAGE* page, struct CCHAT_OP_DATA* op,
-   bstring password_test, int* user_id_out_p, int* session_timeout_p,
-   int user_id, bstring user_name, bstring email,
-   bstring hash, size_t hash_sz, bstring salt, size_t iters, time_t msg_time,
-   int session_timeout
+   bstring password_test, struct CHATDB_USER* user
 ) {
    int retval = 0;
    bstring session = NULL;
@@ -179,7 +176,7 @@ int cchat_profile_user_cb(
    }
 
    retval = cchat_profile_form(
-      page, user_name, email, session, session_timeout );
+      page, user->user_name, user->email, session, user->session_timeout );
 
 cleanup:
 
@@ -206,6 +203,9 @@ int cchat_route_profile(
    struct tagbstring page_title = bsStatic( "Profile" );
    struct WEBUTIL_PAGE page = { 0, 0, 0 };
    struct tagbstring empty_string = bsStatic( "" );
+   struct CHATDB_USER user;
+
+   memset( &user, '\0', sizeof( struct CHATDB_USER ) );
 
    page.title = &page_title;
    page.flags = 0;
@@ -218,9 +218,9 @@ int cchat_route_profile(
 
    if( 0 <= auth_user_id ) {
       /* Edit an existing user. */
+      user.user_id = auth_user_id;
       retval = chatdb_iter_users(
-         &page, op, NULL, auth_user_id, NULL,
-         NULL, NULL, cchat_profile_user_cb, NULL );
+         &page, op, NULL, &user, cchat_profile_user_cb, NULL );
       if( retval ) {
          goto cleanup;
       }
@@ -235,6 +235,8 @@ cleanup:
 
    bcgi_cleanup_bstr( page.scripts, likely );
    bcgi_cleanup_bstr( page.text, likely );
+
+   chatdb_free_user( &user );
 
    return retval;
 }
@@ -427,10 +429,7 @@ cleanup:
 
 int cchat_auth_user_cb(
    struct WEBUTIL_PAGE* page, struct CCHAT_OP_DATA* op,
-   bstring password_test, int* user_id_out_p, int* session_timeout_p,
-   int user_id, bstring user_name, bstring email,
-   bstring hash, size_t hash_sz, bstring salt, size_t iters, time_t msg_time,
-   int session_timeout
+   bstring password_test, struct CHATDB_USER* user
 ) {
    int retval = 0;
    bstring hash_test = NULL;
@@ -438,22 +437,17 @@ int cchat_auth_user_cb(
    assert( NULL != password_test );
 
    retval = bcgi_hash_password(
-      password_test, iters, hash_sz, salt, &hash_test );
+      password_test, user->iters, user->hash_sz, user->salt, &hash_test );
    if( retval ) {
       goto cleanup;
    }
 
    /* Test the provided password. */
-   if( 0 != bstrcmp( hash, hash_test ) ) {
+   if( 0 != bstrcmp( user->hash, hash_test ) ) {
       retval = RETVAL_AUTH;
+      chatdb_free_user( user );
       goto cleanup;
    }
-
-   assert( 0 != user_id );
-
-   /* Return this user as their password matches. */
-   *user_id_out_p = user_id;
-   *session_timeout_p = session_timeout;
 
 cleanup:
 
@@ -480,6 +474,9 @@ int cchat_route_auth(
    bstring recaptcha = NULL;
    bstring recaptcha_decode = NULL;
    int session_timeout = 0;
+   struct CHATDB_USER user_obj;
+
+   memset( &user_obj, '\0', sizeof( struct CHATDB_USER ) );
 
    dbglog_debug( 1, "route: auth\n" );
 
@@ -511,9 +508,10 @@ int cchat_route_auth(
    cchat_decode_field( p, password );
 
    /* Validate username and password. */
+   user_obj.user_name = bstrcpy( user_decode );
+   user_obj.user_id = -1;
    retval = chatdb_iter_users(
-      NULL, op, user_decode, -1, password_decode, &user_id,
-      &session_timeout, cchat_auth_user_cb, &err_msg );
+      NULL, op, password_decode, &user_obj, cchat_auth_user_cb, &err_msg );
    if( retval || 0 > user_id ) {
       if( NULL != err_msg ) {
          retval = bassigncstr( err_msg, "Invalid username or password!" );
@@ -561,6 +559,8 @@ cleanup:
    bcgi_cleanup_bstr( recaptcha, likely );
    bcgi_cleanup_bstr( recaptcha_decode, likely );
    bcgi_cleanup_bstr( err_msg, unlikely );
+
+   chatdb_free_user( &user_obj );
 
    return retval;
 
