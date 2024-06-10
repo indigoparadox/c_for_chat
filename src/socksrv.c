@@ -129,27 +129,23 @@ int _socksrv_client_handshake( struct SOCKSRV_SERVER* srv, bstring buffer ) {
       bdata( secsoc ) );
 
    /* XXX */
-   /* bsecure_hash_sha( secsoc */
-   /*
-   retval = chatdb_b64_encode(
-      secsoc_reply_c, SHA_DIGEST_LENGTH, &secsoc_reply_hash );
-   if( retval ) {
-      goto cleanup;
-   }
+   retval = bcgi_hash_sha( secsoc, &secsoc_reply_hash );
 
    secsoc_reply = bformat(
       "HTTP/1.1 101 Switching Protocols\r\n"
       "Upgrade: websocket\r\n"
       "Connecttion: Upgrade\r\n"
-      "Sec-WebSocket-Accept: %s\r\n",
-      secsoc_reply_c );
+      "Sec-WebSocket-Accept: %s\r\n\r\n",
+      bdata( secsoc_reply_hash ) );
    bcgi_check_null( secsoc_reply );
 
    sent = send(
       srv->client, bdata( secsoc_reply ), blength( secsoc_reply ), 0 );
-   */
 
    dbglog_debug( 1, "reply: %s", bdata( secsoc_reply ) );
+
+   /* Handshake complete! */
+   srv->stage++;
 
 cleanup:
 
@@ -174,9 +170,12 @@ static void* _socksrv_client_handler( void* srv_p ) {
       0 < (read_sz = recv( srv->client, buffer_c, SOCKSRV_BUF_SZ_MAX, 0 ))
    ) {
       bassignblk( buffer, buffer_c, read_sz );
+      memset( buffer_c, 0, SOCKSRV_BUF_SZ_MAX );
       dbglog_debug( 1, "client: %s\n", bdata( buffer ) );
 
-      retval = srv->handlers[srv->stage]( srv, buffer );
+      if( NULL != srv->handlers[srv->stage] ) {
+         retval = srv->handlers[srv->stage]( srv, buffer );
+      }
       
       /* TODO: Validate session and get user. */
    }

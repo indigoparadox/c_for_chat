@@ -327,8 +327,7 @@ int bcgi_hash_sha( bstring in, bstring* out_p ) {
       goto cleanup;
    }
 
-   *out_p = blk2bstr( out_c, SHA_DIGEST_LENGTH );
-   bcgi_check_null( *out_p );
+   retval = bcgi_b64_encode( out_c, SHA_DIGEST_LENGTH, out_p );
 
 cleanup:
 
