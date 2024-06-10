@@ -42,6 +42,7 @@ int chatdb_init( bstring path, struct CCHAT_OP_DATA* op ) {
    assert( NULL != op->db );
 
    /* Create message table if it doesn't exist. */
+   pthread_mutex_lock( &(op->db_mutex) );
    retval = sqlite3_exec( op->db,
       "create table if not exists messages( "
          "msg_id integer primary key,"
@@ -50,6 +51,7 @@ int chatdb_init( bstring path, struct CCHAT_OP_DATA* op ) {
          "room_or_user_to_id integer not null,"
          "msg_text text,"
          "msg_time datetime default current_timestamp );", NULL, 0, &err_msg );
+   pthread_mutex_unlock( &(op->db_mutex) );
    if( SQLITE_OK != retval ) {
       dbglog_error( "could not create database message table: %s\n", err_msg );
       retval = RETVAL_DB;
@@ -58,6 +60,7 @@ int chatdb_init( bstring path, struct CCHAT_OP_DATA* op ) {
    }
 
    /* Create user table if it doesn't exist. */
+   pthread_mutex_lock( &(op->db_mutex) );
    retval = sqlite3_exec( op->db,
       "create table if not exists users( "
          "user_id integer primary key, "
@@ -69,6 +72,7 @@ int chatdb_init( bstring path, struct CCHAT_OP_DATA* op ) {
          "iters integer not null, "
          "join_time datetime default current_timestamp, "
          "session_timeout default 3600 );", NULL, 0, &err_msg );
+   pthread_mutex_unlock( &(op->db_mutex) );
    if( SQLITE_OK != retval ) {
       dbglog_error( "could not create database user table: %s\n", err_msg );
       retval = RETVAL_DB;
@@ -77,6 +81,7 @@ int chatdb_init( bstring path, struct CCHAT_OP_DATA* op ) {
    }
 
    /* Create user table if it doesn't exist. */
+   pthread_mutex_lock( &(op->db_mutex) );
    retval = sqlite3_exec( op->db,
       "create table if not exists sessions( "
          "session_id integer primary key, "
@@ -86,6 +91,7 @@ int chatdb_init( bstring path, struct CCHAT_OP_DATA* op ) {
          "remote_host text not null, "
          "start_time datetime default current_timestamp );",
       NULL, 0, &err_msg );
+   pthread_mutex_unlock( &(op->db_mutex) );
    if( SQLITE_OK != retval ) {
       dbglog_error( "could not create database session table: %s\n", err_msg );
       retval = RETVAL_DB;
@@ -94,6 +100,7 @@ int chatdb_init( bstring path, struct CCHAT_OP_DATA* op ) {
    }
 
    /* Create options table if it doesn't exist. */
+   pthread_mutex_lock( &(op->db_mutex) );
    retval = sqlite3_exec( op->db,
       "create table if not exists options( "
          "option_id integer primary key, "
@@ -101,6 +108,7 @@ int chatdb_init( bstring path, struct CCHAT_OP_DATA* op ) {
          "value text not null, "
          "format integer not null );",
       NULL, 0, &err_msg );
+   pthread_mutex_unlock( &(op->db_mutex) );
    if( SQLITE_OK != retval ) {
       dbglog_error( "could not create database options table: %s\n", err_msg );
       retval = RETVAL_DB;
@@ -119,9 +127,11 @@ int chatdb_init( bstring path, struct CCHAT_OP_DATA* op ) {
    switch( schema_ver.integer ) {
    case 0:
       /* Bring up to version one. */
+      pthread_mutex_lock( &(op->db_mutex) );
       retval = sqlite3_exec( op->db,
          "alter table users add column session_timeout integer default 3600",
          NULL, 0, &err_msg );
+      pthread_mutex_unlock( &(op->db_mutex) );
       if( SQLITE_OK != retval ) {
          dbglog_error( "could not update users table: %s\n", err_msg );
          retval = RETVAL_DB;
@@ -222,7 +232,9 @@ int chatdb_add_user(
       goto cleanup;
    }
 
+   pthread_mutex_lock( &(op->db_mutex) );
    retval = sqlite3_exec( op->db, query, NULL, NULL, &err_msg );
+   pthread_mutex_unlock( &(op->db_mutex) );
    if( SQLITE_OK != retval ) {
       retval = RETVAL_DB;
       if( NULL != err_msg_p ) {
@@ -275,7 +287,9 @@ int chatdb_send_message(
       goto cleanup;
    }
 
+   pthread_mutex_lock( &(op->db_mutex) );
    retval = sqlite3_exec( op->db, query, NULL, NULL, &err_msg );
+   pthread_mutex_unlock( &(op->db_mutex) );
    if( SQLITE_OK != retval ) {
       /* retval = RETVAL_DB; */
       retval = 0;
@@ -346,18 +360,23 @@ int chatdb_iter_messages(
    arg_struct.cb_msg = cb;
    arg_struct.page = page;
 
+   pthread_mutex_lock( &(op->db_mutex) );
    retval = sqlite3_exec( op->db,
       "select m.msg_id, m.msg_type, u.user_name, m.room_or_user_to_id, "
          "m.msg_text, strftime('%s', m.msg_time) from messages m "
          "inner join users u on u.user_id = m.user_from_id "
          "order by m.msg_time desc limit 100",
       chatdb_dbcb_messages, &arg_struct, &err_msg );
+   pthread_mutex_unlock( &(op->db_mutex) );
    if( SQLITE_OK != retval ) {
       /* TODO: Return err_msg. */
       dbglog_error( "could not execute database message query: %s\n",
          err_msg );
       if( NULL != err_msg_p ) {
          *err_msg_p = bfromcstr( err_msg );
+      }
+      if( NULL != err_msg ) {
+         sqlite3_free( err_msg );
       }
       retval = RETVAL_DB;
       goto cleanup;
@@ -367,10 +386,6 @@ int chatdb_iter_messages(
    retval = 0;
 
 cleanup:
-
-   if( NULL != err_msg ) {
-      sqlite3_free( err_msg );
-   }
 
    return retval;
 }
@@ -499,7 +514,10 @@ int chatdb_iter_users(
       goto cleanup;
    }
 
-   retval = sqlite3_exec( op->db, query, chatdb_dbcb_users, &arg_struct, &err_msg );
+   pthread_mutex_lock( &(op->db_mutex) );
+   retval =
+      sqlite3_exec( op->db, query, chatdb_dbcb_users, &arg_struct, &err_msg );
+   pthread_mutex_unlock( &(op->db_mutex) );
    if( SQLITE_OK != retval ) {
       /* Return err_msg. */
       dbglog_error(
@@ -563,7 +581,9 @@ int chatdb_add_session(
       goto cleanup;
    }
 
+   pthread_mutex_lock( &(op->db_mutex) );
    retval = sqlite3_exec( op->db, query, NULL, NULL, &err_msg );
+   pthread_mutex_unlock( &(op->db_mutex) );
    if( SQLITE_OK != retval ) {
       retval = RETVAL_DB;
       *err_msg_p = bfromcstr( err_msg );
@@ -642,8 +662,10 @@ int chatdb_iter_sessions(
       goto cleanup;
    }
 
+   pthread_mutex_lock( &(op->db_mutex) );
    retval = sqlite3_exec(
       op->db, query, chatdb_dbcb_sessions, &arg_struct, &err_msg );
+   pthread_mutex_unlock( &(op->db_mutex) );
    if( SQLITE_OK != retval ) {
       dbglog_error( "could not execute database session query: %s\n",
          err_msg );
@@ -686,7 +708,9 @@ int chatdb_remove_session(
       goto cleanup;
    }
 
+   pthread_mutex_lock( &(op->db_mutex) );
    retval = sqlite3_exec( op->db, query, NULL, NULL, &err_msg );
+   pthread_mutex_unlock( &(op->db_mutex) );
    if( SQLITE_OK != retval ) {
       dbglog_error( "could not execute database session delete: %s\n",
          err_msg );
@@ -751,8 +775,10 @@ int chatdb_get_option(
       goto cleanup;
    }
 
+   pthread_mutex_lock( &(op->db_mutex) );
    retval = sqlite3_exec(
       op->db, query, chatdb_dbcb_options, val, &err_msg );
+   pthread_mutex_unlock( &(op->db_mutex) );
    if( SQLITE_OK != retval ) {
       dbglog_error( "could not execute database session query: %s\n",
          err_msg );
@@ -818,7 +844,9 @@ int chatdb_set_option(
       key, bdata( value_set ), format );
    bcgi_check_null( query );
 
+   pthread_mutex_lock( &(op->db_mutex) );
    retval = sqlite3_exec( op->db, query, NULL, NULL, &err_msg );
+   pthread_mutex_unlock( &(op->db_mutex) );
    if( SQLITE_OK != retval ) {
       retval = RETVAL_DB;
       if( NULL != err_msg_p ) {
