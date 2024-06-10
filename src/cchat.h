@@ -9,7 +9,7 @@ int cchat_auth_session_cb(
    int session_id, int user_id,
    bstring hash, size_t hash_sz, bstring remote_host, time_t start_time );
 
-int cchat_handle_req( FCGX_Request* req, sqlite3* db );
+int cchat_handle_req( struct CCHAT_OP_DATA* op );
 
 int cchat_lws_cb(
    struct lws* wsi, enum lws_callback_reasons reason, void *user, void *in,

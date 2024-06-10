@@ -4,8 +4,8 @@
 #include <stdlib.h> /* for atoi() */
 
 typedef int (*cchat_route_cb_t)(
-   FCGX_Request* req, int auth_user_id,
-   struct bstrList* q, struct bstrList* p, struct bstrList* c, sqlite3* db );
+   struct CCHAT_OP_DATA* op, int auth_user_id,
+   struct bstrList* q, struct bstrList* p, struct bstrList* c );
 
 extern bstring g_recaptcha_site_key;
 extern bstring g_recaptcha_secret_key;
@@ -40,8 +40,8 @@ extern bstring g_recaptcha_secret_key;
    cchat_decode_field_rename( list, field_name, field_name );
 
 int cchat_route_logout(
-   FCGX_Request* req, int auth_user_id,
-   struct bstrList* q, struct bstrList* p, struct bstrList* c, sqlite3* db
+   struct CCHAT_OP_DATA* op, int auth_user_id,
+   struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
    bstring session = NULL;
@@ -49,14 +49,14 @@ int cchat_route_logout(
    /* See if a valid session exists (don't urldecode!). */
    retval = bcgi_query_key( c, "session", &session );
    if( !retval && NULL != session ) {
-      retval = chatdb_remove_session( NULL, db, session, NULL );
+      retval = chatdb_remove_session( NULL, op, session, NULL );
    }
 
    /* Redirect to route. */
-   FCGX_FPrintF( req->out, "Status: 303 See Other\r\n" );
-   FCGX_FPrintF( req->out, "Location: /login\r\n" );
-   FCGX_FPrintF( req->out, "Cache-Control: no-cache\r\n" );
-   FCGX_FPrintF( req->out, "\r\n" ); 
+   FCGX_FPrintF( op->req.out, "Status: 303 See Other\r\n" );
+   FCGX_FPrintF( op->req.out, "Location: /login\r\n" );
+   FCGX_FPrintF( op->req.out, "Cache-Control: no-cache\r\n" );
+   FCGX_FPrintF( op->req.out, "\r\n" ); 
 
    if( NULL != session ) {
       bdestroy( session );
@@ -151,7 +151,7 @@ cleanup:
 }
 
 int cchat_profile_user_cb(
-   struct WEBUTIL_PAGE* page, FCGX_Request* req,
+   struct WEBUTIL_PAGE* page, struct CCHAT_OP_DATA* op,
    bstring password_test, int* user_id_out_p, int* session_timeout_p,
    int user_id, bstring user_name, bstring email,
    bstring hash, size_t hash_sz, bstring salt, size_t iters, time_t msg_time,
@@ -162,7 +162,7 @@ int cchat_profile_user_cb(
    bstring req_cookie = NULL;
    struct bstrList* c = NULL;
 
-   req_cookie = bfromcstr( FCGX_GetParam( "HTTP_COOKIE", req->envp ) );
+   req_cookie = bfromcstr( FCGX_GetParam( "HTTP_COOKIE", op->req.envp ) );
    if( NULL == req_cookie ) {
       dbglog_error( "no cookie provided to user validator!\n" );
       retval = RETVAL_PARAMS;
@@ -199,8 +199,8 @@ cleanup:
 }
 
 int cchat_route_profile(
-   FCGX_Request* req, int auth_user_id,
-   struct bstrList* q, struct bstrList* p, struct bstrList* c, sqlite3* db
+   struct CCHAT_OP_DATA* op, int auth_user_id,
+   struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
    struct tagbstring page_title = bsStatic( "Profile" );
@@ -219,7 +219,7 @@ int cchat_route_profile(
    if( 0 <= auth_user_id ) {
       /* Edit an existing user. */
       retval = chatdb_iter_users(
-         &page, db, req, NULL, auth_user_id, NULL,
+         &page, op, NULL, auth_user_id, NULL,
          NULL, NULL, cchat_profile_user_cb, NULL );
       if( retval ) {
          goto cleanup;
@@ -229,7 +229,7 @@ int cchat_route_profile(
          &page, &empty_string, &empty_string, NULL, 3600 );
    }
 
-   retval = webutil_show_page( req, q, p, &page );
+   retval = webutil_show_page( &(op->req), q, p, &page );
 
 cleanup:
 
@@ -240,8 +240,8 @@ cleanup:
 }
 
 int cchat_route_user(
-   FCGX_Request* req, int auth_user_id,
-   struct bstrList* q, struct bstrList* p, struct bstrList* c, sqlite3* db
+   struct CCHAT_OP_DATA* op, int auth_user_id,
+   struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
    bstring user = NULL;
@@ -301,7 +301,7 @@ int cchat_route_user(
       }
       assert( NULL != recaptcha_decode );
 
-      retval = webutil_check_recaptcha( req, recaptcha_decode );
+      retval = webutil_check_recaptcha( &(op->req), recaptcha_decode );
       if( retval ) {
          assert( NULL == err_msg );
          err_msg = bfromcstr( "Invalid ReCAPTCHA response!" );
@@ -327,23 +327,23 @@ int cchat_route_user(
    dbglog_debug( 1, "adding user: %s\n", bdata( user ) );
 
    retval = chatdb_add_user(
-      db, auth_user_id, user_decode, password1_decode, email_decode,
+      op, auth_user_id, user_decode, password1_decode, email_decode,
       session_timeout_decode, &err_msg );
 
 cleanup:
 
    /* Redirect to route. */
-   FCGX_FPrintF( req->out, "Status: 303 See Other\r\n" );
+   FCGX_FPrintF( op->req.out, "Status: 303 See Other\r\n" );
    if( NULL != err_msg ) {
       FCGX_FPrintF(
-         req->out, "Location: /profile?error=%s\r\n", bdata( err_msg ) );
+         op->req.out, "Location: /profile?error=%s\r\n", bdata( err_msg ) );
    } else if( 0 <= auth_user_id ) {
-      FCGX_FPrintF( req->out, "Location: /profile\r\n" );
+      FCGX_FPrintF( op->req.out, "Location: /profile\r\n" );
    } else {
-      FCGX_FPrintF( req->out, "Location: /login\r\n" );
+      FCGX_FPrintF( op->req.out, "Location: /login\r\n" );
    }
-   FCGX_FPrintF( req->out, "Cache-Control: no-cache\r\n" );
-   FCGX_FPrintF( req->out, "\r\n" ); 
+   FCGX_FPrintF( op->req.out, "Cache-Control: no-cache\r\n" );
+   FCGX_FPrintF( op->req.out, "\r\n" ); 
 
    bcgi_cleanup_bstr( session_timeout, likely );
    bcgi_cleanup_bstr( session_timeout_decode, likely );
@@ -367,8 +367,8 @@ cleanup:
 }
 
 int cchat_route_login(
-   FCGX_Request* req, int auth_user_id,
-   struct bstrList* q, struct bstrList* p, struct bstrList* c, sqlite3* db
+   struct CCHAT_OP_DATA* op, int auth_user_id,
+   struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
    struct WEBUTIL_PAGE page = { 0, 0, 0 };
@@ -415,7 +415,7 @@ int cchat_route_login(
    page.title = &page_title;
    page.flags = WEBUTIL_PAGE_FLAG_NONAV;
 
-   retval = webutil_show_page( req, q, p, &page );
+   retval = webutil_show_page( &(op->req), q, p, &page );
 
 cleanup:
 
@@ -426,7 +426,7 @@ cleanup:
 }
 
 int cchat_auth_user_cb(
-   struct WEBUTIL_PAGE* page, FCGX_Request* req,
+   struct WEBUTIL_PAGE* page, struct CCHAT_OP_DATA* op,
    bstring password_test, int* user_id_out_p, int* session_timeout_p,
    int user_id, bstring user_name, bstring email,
    bstring hash, size_t hash_sz, bstring salt, size_t iters, time_t msg_time,
@@ -465,8 +465,8 @@ cleanup:
 }
 
 int cchat_route_auth(
-   FCGX_Request* req, int auth_user_id,
-   struct bstrList* q, struct bstrList* p, struct bstrList* c, sqlite3* db
+   struct CCHAT_OP_DATA* op, int auth_user_id,
+   struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
    bstring user = NULL;
@@ -497,7 +497,7 @@ int cchat_route_auth(
       }
       assert( NULL != recaptcha_decode );
 
-      retval = webutil_check_recaptcha( req, recaptcha_decode );
+      retval = webutil_check_recaptcha( &(op->req), recaptcha_decode );
       if( retval ) {
          assert( NULL == err_msg );
          err_msg = bfromcstr( "Invalid ReCAPTCHA response!" );
@@ -512,7 +512,7 @@ int cchat_route_auth(
 
    /* Validate username and password. */
    retval = chatdb_iter_users(
-      NULL, db, req, user_decode, -1, password_decode, &user_id,
+      NULL, op, user_decode, -1, password_decode, &user_id,
       &session_timeout, cchat_auth_user_cb, &err_msg );
    if( retval || 0 > user_id ) {
       if( NULL != err_msg ) {
@@ -525,9 +525,9 @@ int cchat_route_auth(
       goto cleanup;
    }
 
-   remote_host = bfromcstr( FCGX_GetParam( "REMOTE_ADDR", req->envp ) );
+   remote_host = bfromcstr( FCGX_GetParam( "REMOTE_ADDR", op->req.envp ) );
 
-   retval = chatdb_add_session( db, user_id, remote_host, &hash, &err_msg );
+   retval = chatdb_add_session( op, user_id, remote_host, &hash, &err_msg );
    if( retval ) {
       assert( NULL != err_msg );
       goto cleanup;
@@ -536,21 +536,21 @@ int cchat_route_auth(
    dbglog_debug( 2, "setting authorized session cookie: %s\n", bdata( hash ) );
 
    /* Set auth cookie. */
-   FCGX_FPrintF( req->out, "Set-Cookie: session=%s; Max-Age=%d; HttpOnly\r\n",
+   FCGX_FPrintF( op->req.out, "Set-Cookie: session=%s; Max-Age=%d; HttpOnly\r\n",
       bdata( hash ), session_timeout );
 
 cleanup:
 
    /* Redirect to route. */
-   FCGX_FPrintF( req->out, "Status: 303 See Other\r\n" );
+   FCGX_FPrintF( op->req.out, "Status: 303 See Other\r\n" );
    if( NULL != err_msg ) {
       FCGX_FPrintF(
-         req->out, "Location: /login?error=%s\r\n", bdata( err_msg ) );
+         op->req.out, "Location: /login?error=%s\r\n", bdata( err_msg ) );
    } else {
-      FCGX_FPrintF( req->out, "Location: /chat\r\n" );
+      FCGX_FPrintF( op->req.out, "Location: /chat\r\n" );
    }
-   FCGX_FPrintF( req->out, "Cache-Control: no-cache\r\n" );
-   FCGX_FPrintF( req->out, "\r\n" );
+   FCGX_FPrintF( op->req.out, "Cache-Control: no-cache\r\n" );
+   FCGX_FPrintF( op->req.out, "\r\n" );
 
    bcgi_cleanup_bstr( remote_host, likely );
    bcgi_cleanup_bstr( hash, likely );
@@ -567,8 +567,8 @@ cleanup:
 }
 
 int cchat_route_send(
-   FCGX_Request* req, int auth_user_id,
-   struct bstrList* q, struct bstrList* p, struct bstrList* c, sqlite3* db
+   struct CCHAT_OP_DATA* op, int auth_user_id,
+   struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
    bstring chat = NULL;
@@ -607,7 +607,7 @@ int cchat_route_send(
    /* There is POST data, so try to decode it. */
    cchat_decode_field( p, chat );
 
-   retval = chatdb_send_message( db, auth_user_id, chat_decode, &err_msg );
+   retval = chatdb_send_message( op, auth_user_id, chat_decode, &err_msg );
    if( retval ) {
       goto cleanup;
    }
@@ -615,15 +615,15 @@ int cchat_route_send(
 cleanup:
 
    /* Redirect to route. */
-   FCGX_FPrintF( req->out, "Status: 303 See Other\r\n" );
+   FCGX_FPrintF( op->req.out, "Status: 303 See Other\r\n" );
    if( NULL != err_msg ) {
       FCGX_FPrintF(
-         req->out, "Location: /chat?error=%s\r\n", bdata( err_msg ) );
+         op->req.out, "Location: /chat?error=%s\r\n", bdata( err_msg ) );
    } else {
-      FCGX_FPrintF( req->out, "Location: /chat?mini=bottom\r\n" );
+      FCGX_FPrintF( op->req.out, "Location: /chat?mini=bottom\r\n" );
    }
-   FCGX_FPrintF( req->out, "Cache-Control: no-cache\r\n" );
-   FCGX_FPrintF( req->out, "\r\n" );
+   FCGX_FPrintF( op->req.out, "Cache-Control: no-cache\r\n" );
+   FCGX_FPrintF( op->req.out, "\r\n" );
 
    if( NULL != csrf ) {
       bdestroy( csrf );
@@ -692,8 +692,8 @@ cleanup:
 #define USE_WEBSOCKETS 1
 
 int cchat_route_chat(
-   FCGX_Request* req, int auth_user_id,
-   struct bstrList* q, struct bstrList* p, struct bstrList* c, sqlite3* db
+   struct CCHAT_OP_DATA* op, int auth_user_id,
+   struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
    struct tagbstring page_title = bsStatic( "Chat" );
@@ -709,11 +709,11 @@ int cchat_route_chat(
       dbglog_debug( 3, "/chat access by unauthorized user!\n" );
 
       /* Invalid user; redirect to login. */
-      FCGX_FPrintF( req->out, "Status: 303 See Other\r\n" );
-      FCGX_FPrintF( req->out,
+      FCGX_FPrintF( op->req.out, "Status: 303 See Other\r\n" );
+      FCGX_FPrintF( op->req.out,
          "Location: /login?error=Invalid session cookie!\r\n" );
-      FCGX_FPrintF( req->out, "Cache-Control: no-cache\r\n" );
-      FCGX_FPrintF( req->out, "\r\n" );
+      FCGX_FPrintF( op->req.out, "Cache-Control: no-cache\r\n" );
+      FCGX_FPrintF( op->req.out, "\r\n" );
       goto cleanup;
    }
 
@@ -763,7 +763,7 @@ int cchat_route_chat(
       bcgi_check_bstr_err( page.text );
 
       retval = chatdb_iter_messages(
-         &page, db, 0, 0, cchat_print_msg_cb, &err_msg );
+         &page, op, 0, 0, cchat_print_msg_cb, &err_msg );
       if( retval ) {
          dbglog_error( "error iteraing messages!\n" );
          goto cleanup;
@@ -803,7 +803,7 @@ int cchat_route_chat(
    }
 #endif /* !USE_WEBSOCKETS */
 
-   retval = webutil_show_page( req, q, p, &page );
+   retval = webutil_show_page( &(op->req), q, p, &page );
 
 cleanup:
 
@@ -817,42 +817,42 @@ cleanup:
 }
 
 int cchat_route_style_css(
-   FCGX_Request* req, int auth_user_id,
-   struct bstrList* q, struct bstrList* p, struct bstrList* c, sqlite3* db
+   struct CCHAT_OP_DATA* op, int auth_user_id,
+   struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
 
-   retval = webutil_dump_file( req, "style.css", "text/css" );
+   retval = webutil_dump_file( &(op->req), "style.css", "text/css" );
 
    return retval;
 }
 
 int cchat_route_chat_js(
-   FCGX_Request* req, int auth_user_id,
-   struct bstrList* q, struct bstrList* p, struct bstrList* c, sqlite3* db
+   struct CCHAT_OP_DATA* op, int auth_user_id,
+   struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
 
-   retval = webutil_dump_file( req, "chat.js", "text/javascript" );
+   retval = webutil_dump_file( &(op->req), "chat.js", "text/javascript" );
 
    return retval;
 }
 
 int cchat_route_root(
-   FCGX_Request* req, int auth_user_id,
-   struct bstrList* q, struct bstrList* p, struct bstrList* c, sqlite3* db
+   struct CCHAT_OP_DATA* op, int auth_user_id,
+   struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
 
-   FCGX_FPrintF( req->out, "Status: 303 See Other\r\n" );
+   FCGX_FPrintF( op->req.out, "Status: 303 See Other\r\n" );
    if( 0 > auth_user_id ) {
       /* Invalid user; redirect to login. */
-      FCGX_FPrintF( req->out, "Location: /login\r\n" );
+      FCGX_FPrintF( op->req.out, "Location: /login\r\n" );
    } else {
-      FCGX_FPrintF( req->out, "Location: /chat\r\n" );
+      FCGX_FPrintF( op->req.out, "Location: /chat\r\n" );
    }
-   FCGX_FPrintF( req->out, "Cache-Control: no-cache\r\n" );
-   FCGX_FPrintF( req->out, "\r\n" );
+   FCGX_FPrintF( op->req.out, "Cache-Control: no-cache\r\n" );
+   FCGX_FPrintF( op->req.out, "\r\n" );
 
    return retval;
 }
@@ -890,7 +890,7 @@ int cchat_auth_session_cb(
    return retval;
 }
 
-int cchat_handle_req( FCGX_Request* req, sqlite3* db ) {
+int cchat_handle_req( struct CCHAT_OP_DATA* op ) {
    int retval = 0;
    size_t i = 0;
    bstring req_method = NULL;
@@ -907,21 +907,21 @@ int cchat_handle_req( FCGX_Request* req, sqlite3* db ) {
    int auth_user_id = -1;
 
    if( 0 >= g_dbglog_level ) {
-      while( NULL != req->envp[i] ) {
-         dbglog_debug( 0, "envp: %s\n", req->envp[i] );
+      while( NULL != op->req.envp[i] ) {
+         dbglog_debug( 0, "envp: %s\n", op->req.envp[i] );
          i++;
       }
       i = 0;
    }
 
-   remote_host = bfromcstr( FCGX_GetParam( "REMOTE_ADDR", req->envp ) );
+   remote_host = bfromcstr( FCGX_GetParam( "REMOTE_ADDR", op->req.envp ) );
    dbglog_debug( 1, "remote host: %s\n", bdata( remote_host ) );
 
    /* Figure out our request method and consequent action. */
-   req_method = bfromcstr( FCGX_GetParam( "REQUEST_METHOD", req->envp ) );
+   req_method = bfromcstr( FCGX_GetParam( "REQUEST_METHOD", op->req.envp ) );
    bcgi_check_null( req_method );
 
-   req_uri_raw = bfromcstr( FCGX_GetParam( "REQUEST_URI", req->envp ) );
+   req_uri_raw = bfromcstr( FCGX_GetParam( "REQUEST_URI", op->req.envp ) );
    bcgi_check_null( req_uri_raw );
 
    if( BSTR_ERR != bstrchr( req_uri_raw, '?' ) ) {
@@ -930,7 +930,7 @@ int cchat_handle_req( FCGX_Request* req, sqlite3* db ) {
    }
 
    /* Get query string and split into list. */
-   req_query = bfromcstr( FCGX_GetParam( "QUERY_STRING", req->envp ) );
+   req_query = bfromcstr( FCGX_GetParam( "QUERY_STRING", op->req.envp ) );
    if( NULL == req_query ) {
       dbglog_error( "invalid request query string!\n" );
       retval = RETVAL_PARAMS;
@@ -940,7 +940,7 @@ int cchat_handle_req( FCGX_Request* req, sqlite3* db ) {
    req_query_list = bsplit( req_query, '&' );
 
    /* Get cookies and split into list. */
-   req_cookie = bfromcstr( FCGX_GetParam( "HTTP_COOKIE", req->envp ) );
+   req_cookie = bfromcstr( FCGX_GetParam( "HTTP_COOKIE", op->req.envp ) );
    if( NULL != req_cookie ) {
       /* Split the cookie string. */
       req_cookie_list = bsplit( req_cookie, ';' );
@@ -955,7 +955,7 @@ int cchat_handle_req( FCGX_Request* req, sqlite3* db ) {
       if( !retval && NULL != session ) {
          dbglog_debug( 2, "session cookie found: %s\n", bdata( session ) );
          chatdb_iter_sessions(
-            NULL, &auth_user_id, db, session,
+            NULL, &auth_user_id, op, session,
             remote_host, cchat_auth_session_cb, NULL );
       }
    } else {
@@ -965,14 +965,14 @@ int cchat_handle_req( FCGX_Request* req, sqlite3* db ) {
    /* Get POST data (if any). */
    if( 1 == biseqcaselessStatic( req_method, "POST" ) ) {
       /* Allocate buffer to hold POST data. */
-      post_buf_sz = atoi( FCGX_GetParam( "CONTENT_LENGTH", req->envp ) );
+      post_buf_sz = atoi( FCGX_GetParam( "CONTENT_LENGTH", op->req.envp ) );
       post_buf = bfromcstralloc( post_buf_sz + 1, "" );
       if( NULL == post_buf || NULL == bdata( post_buf ) ) {
          dbglog_error( "could not allocate POST buffer!\n" );
          retval = RETVAL_ALLOC;
          goto cleanup;
       }
-      FCGX_GetStr( bdata( post_buf ), post_buf_sz, req->in );
+      FCGX_GetStr( bdata( post_buf ), post_buf_sz, op->req.in );
       post_buf->slen = post_buf_sz;
       post_buf->data[post_buf_sz] = '\0';
 
@@ -1008,12 +1008,12 @@ int cchat_handle_req( FCGX_Request* req, sqlite3* db ) {
       dbglog_debug( 1, "found root for URI: %s\n", bdata( req_uri_raw ) );
       /* A valid route was found! */
       retval = gc_cchat_route_cbs[i](
-         req, auth_user_id,
-         req_query_list, post_buf_list, req_cookie_list, db );
+         op, auth_user_id,
+         req_query_list, post_buf_list, req_cookie_list );
    } else {
       dbglog_debug(
          1, "did not find root for URI: %s\n", bdata( req_uri_raw ) );
-      FCGX_FPrintF( req->out, "Status: 404 Bad Request\r\n\r\n" );
+      FCGX_FPrintF( op->req.out, "Status: 404 Bad Request\r\n\r\n" );
    }
 
 cleanup:

@@ -8,17 +8,15 @@
 #include <unistd.h> /* for getopt() */
 #include <signal.h>
 
-#include <pthread.h>
 #include <curl/curl.h>
 
 extern bstring g_recaptcha_site_key;
 extern bstring g_recaptcha_secret_key;
 
 static int g_cgi_sock = -1;
-FCGX_Request g_req;
-sqlite3* g_db = NULL;
 struct lws_context* g_lws_ctx = NULL;
 int g_lws_running = 1;
+struct CCHAT_OP_DATA* g_op = NULL;
 
 enum lws_protocol_list {
 	PROTOCOL_HTTP = 0,
@@ -49,6 +47,11 @@ int main_cb_http(
    bstring session = NULL;
    int auth_user_id = -1;
    bstring remote_host = NULL; /* TODO */
+   struct CCHAT_OP_DATA* op = NULL;
+
+   op = lws_context_user( lws_get_context( wsi ) );
+
+   assert( NULL != op );
 
    switch( reason ) {
    case LWS_CALLBACK_HTTP:
@@ -87,7 +90,7 @@ int main_cb_http(
       /* TODO: Database mutex! */
       dbglog_debug( 2, "session cookie found: %s\n", bdata( session ) );
       chatdb_iter_sessions(
-         NULL, &auth_user_id, g_db, session,
+         NULL, &auth_user_id, op, session,
          remote_host, cchat_auth_session_cb, NULL );
 
       if( 0 > auth_user_id ) {
@@ -119,9 +122,13 @@ void main_shutdown( int sig ) {
 
    dbglog_debug( 1, "shutting down...\n" );
 
-   if( NULL != g_db ) {
+   if( NULL == g_op ) {
+      goto no_g_op;
+   }
+
+   if( NULL != g_op->db ) {
       dbglog_debug( 1, "shutting down database...\n" );
-      chatdb_close( &g_db );
+      chatdb_close( g_op );
    }
 
    dbglog_debug( 1, "shutting down socket server...\n" );
@@ -129,7 +136,7 @@ void main_shutdown( int sig ) {
 
    if( 0 <= g_cgi_sock ) {
       dbglog_debug( 1, "shutting down FastCGI...\n" );
-      FCGX_Free( &g_req, g_cgi_sock );
+      FCGX_Free( &(g_op->req), g_cgi_sock );
    }
 
    dbglog_debug( 1, "shutting down curl...\n" );
@@ -137,6 +144,12 @@ void main_shutdown( int sig ) {
 
    dbglog_debug( 1, "shutting down logging...\n" );
    dbglog_shutdown();
+
+no_g_op:
+
+   if( NULL != g_op ) {
+      free( g_op );
+   }
 
    exit( 0 );
 }
@@ -159,11 +172,15 @@ int main( int argc, char* argv[] ) {
    struct lws_context_creation_info lws_info;
    pthread_t sock_thd = -1;
 
+   g_op = calloc( sizeof( struct CCHAT_OP_DATA ), 1 );
+   bcgi_check_null( g_op );
+
    memset( &lws_info, 0, sizeof( struct lws_context_creation_info ) );
    lws_info.gid = -1;
    lws_info.uid = -1;
    lws_info.port = 9777;
    lws_info.protocols = lws_protocol_info;
+   lws_info.user = g_op;
 
    /* Parse args. */
    while( -1 != (o = getopt( argc, argv, "l:d:s:" )) ) {
@@ -233,7 +250,7 @@ int main( int argc, char* argv[] ) {
 
    dbglog_debug( 3, "initializing database...\n" );
 
-   retval = chatdb_init( &chatdb_path, &g_db );
+   retval = chatdb_init( &chatdb_path, g_op );
    if( retval ) {
       goto cleanup;
    }
@@ -241,7 +258,7 @@ int main( int argc, char* argv[] ) {
    dbglog_debug( 3, "initializing FastCGI...\n" );
 
    FCGX_Init();
-   memset( &g_req, 0, sizeof( FCGX_Request ) );
+   memset( &(g_op->req), 0, sizeof( FCGX_Request ) );
 
    dbglog_debug( 3, "starting socket server...\n" );
 
@@ -257,15 +274,15 @@ int main( int argc, char* argv[] ) {
    dbglog_debug( 4, "listening on %s...\n", bdata( server_listen ) );
 
    g_cgi_sock = FCGX_OpenSocket( bdata( server_listen ), 100 );
-   FCGX_InitRequest( &g_req, g_cgi_sock, 0 );
+   FCGX_InitRequest( &(g_op->req), g_cgi_sock, 0 );
 
    signal( SIGINT, main_shutdown );
 
-	while( 0 <= FCGX_Accept_r( &g_req ) ) {
+	while( 0 <= FCGX_Accept_r( &(g_op->req) ) ) {
 
       dbglog_debug( 1, "received request...\n" );
 
-      retval = cchat_handle_req( &g_req, g_db );
+      retval = cchat_handle_req( g_op );
       if( RETVAL_ALLOC == retval ) {
          /* Can't fix that. */
          goto cleanup;

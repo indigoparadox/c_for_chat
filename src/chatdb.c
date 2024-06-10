@@ -23,24 +23,26 @@ struct CHATDB_ARG {
    struct WEBUTIL_PAGE* page;
    bstring password_test;
    int* user_id_out_p;
-   FCGX_Request* req;
+   struct CCHAT_OP_DATA* op;
    int* session_timeout_p;
 };
 
-int chatdb_init( bstring path, sqlite3** db_p ) {
+int chatdb_init( bstring path, struct CCHAT_OP_DATA* op ) {
    int retval = 0;
    char* err_msg = NULL;
    union CHATDB_OPTION_VAL schema_ver;
 
-   retval = sqlite3_open( bdata( path ), db_p );
+   retval = sqlite3_open( bdata( path ), &(op->db) );
    if( SQLITE_OK != retval ) {
       dbglog_error( "could not open database!\n" );
       retval = RETVAL_DB;
       goto cleanup;
    }
 
+   assert( NULL != op->db );
+
    /* Create message table if it doesn't exist. */
-   retval = sqlite3_exec( *db_p,
+   retval = sqlite3_exec( op->db,
       "create table if not exists messages( "
          "msg_id integer primary key,"
          "msg_type integer not null,"
@@ -56,7 +58,7 @@ int chatdb_init( bstring path, sqlite3** db_p ) {
    }
 
    /* Create user table if it doesn't exist. */
-   retval = sqlite3_exec( *db_p,
+   retval = sqlite3_exec( op->db,
       "create table if not exists users( "
          "user_id integer primary key, "
          "user_name text not null unique, "
@@ -75,7 +77,7 @@ int chatdb_init( bstring path, sqlite3** db_p ) {
    }
 
    /* Create user table if it doesn't exist. */
-   retval = sqlite3_exec( *db_p,
+   retval = sqlite3_exec( op->db,
       "create table if not exists sessions( "
          "session_id integer primary key, "
          "user_id integer not null, "
@@ -92,7 +94,7 @@ int chatdb_init( bstring path, sqlite3** db_p ) {
    }
 
    /* Create options table if it doesn't exist. */
-   retval = sqlite3_exec( *db_p,
+   retval = sqlite3_exec( op->db,
       "create table if not exists options( "
          "option_id integer primary key, "
          "key text not null unique, "
@@ -108,7 +110,7 @@ int chatdb_init( bstring path, sqlite3** db_p ) {
 
    /* Check to see if we're running an old schema. */
    schema_ver.integer = 0;
-   retval = chatdb_get_option( "schema_version", &schema_ver, *db_p, NULL );
+   retval = chatdb_get_option( "schema_version", &schema_ver, op, NULL );
    if( retval ) {
       dbglog_error( "error getting schema version!\n" );
       goto cleanup;
@@ -117,7 +119,7 @@ int chatdb_init( bstring path, sqlite3** db_p ) {
    switch( schema_ver.integer ) {
    case 0:
       /* Bring up to version one. */
-      retval = sqlite3_exec( *db_p,
+      retval = sqlite3_exec( op->db,
          "alter table users add column session_timeout integer default 3600",
          NULL, 0, &err_msg );
       if( SQLITE_OK != retval ) {
@@ -128,7 +130,7 @@ int chatdb_init( bstring path, sqlite3** db_p ) {
       }
       schema_ver.integer = 1;
       retval = chatdb_set_option( 
-         "schema_version", &schema_ver, CHATDB_OPTION_FMT_INT, *db_p, NULL );
+         "schema_version", &schema_ver, CHATDB_OPTION_FMT_INT, op, NULL );
       if( retval ) {
          dbglog_error( "error setting schema version!\n" );
          goto cleanup;
@@ -145,15 +147,15 @@ cleanup:
    return retval;
 }
 
-void chatdb_close( sqlite3** db_p ) {
+void chatdb_close( struct CCHAT_OP_DATA* op ) {
 
-   sqlite3_close( *db_p );
-   *db_p = NULL;
+   sqlite3_close( op->db );
+   op->db = NULL;
 
 }
 
 int chatdb_add_user(
-   sqlite3* db, int user_id, bstring user, bstring password, bstring email,
+   struct CCHAT_OP_DATA* op, int user_id, bstring user, bstring password, bstring email,
    bstring session_timeout, bstring* err_msg_p
 ) {
    int retval = 0;
@@ -220,7 +222,7 @@ int chatdb_add_user(
       goto cleanup;
    }
 
-   retval = sqlite3_exec( db, query, NULL, NULL, &err_msg );
+   retval = sqlite3_exec( op->db, query, NULL, NULL, &err_msg );
    if( SQLITE_OK != retval ) {
       retval = RETVAL_DB;
       if( NULL != err_msg_p ) {
@@ -255,7 +257,7 @@ cleanup:
 }
 
 int chatdb_send_message(
-   sqlite3* db, int user_id, bstring msg, bstring* err_msg_p
+   struct CCHAT_OP_DATA* op, int user_id, bstring msg, bstring* err_msg_p
 ) {
    int retval = 0;
    char* query = NULL;
@@ -273,7 +275,7 @@ int chatdb_send_message(
       goto cleanup;
    }
 
-   retval = sqlite3_exec( db, query, NULL, NULL, &err_msg );
+   retval = sqlite3_exec( op->db, query, NULL, NULL, &err_msg );
    if( SQLITE_OK != retval ) {
       /* retval = RETVAL_DB; */
       retval = 0;
@@ -334,7 +336,7 @@ cleanup:
 }
 
 int chatdb_iter_messages(
-   struct WEBUTIL_PAGE* page, sqlite3* db,
+   struct WEBUTIL_PAGE* page, struct CCHAT_OP_DATA* op,
    int msg_type, int dest_id, chatdb_iter_msg_cb_t cb, bstring* err_msg_p
 ) {
    int retval = 0;
@@ -344,7 +346,7 @@ int chatdb_iter_messages(
    arg_struct.cb_msg = cb;
    arg_struct.page = page;
 
-   retval = sqlite3_exec( db,
+   retval = sqlite3_exec( op->db,
       "select m.msg_id, m.msg_type, u.user_name, m.room_or_user_to_id, "
          "m.msg_text, strftime('%s', m.msg_time) from messages m "
          "inner join users u on u.user_id = m.user_from_id "
@@ -418,7 +420,7 @@ int chatdb_dbcb_users( void* arg, int argc, char** argv, char **col ) {
 
    retval = arg_struct->cb_user(
       arg_struct->page,
-      arg_struct->req,
+      arg_struct->op,
       arg_struct->password_test,
       arg_struct->user_id_out_p,
       arg_struct->session_timeout_p,
@@ -454,7 +456,7 @@ cleanup:
 }
 
 int chatdb_iter_users(
-   struct WEBUTIL_PAGE* page, sqlite3* db, FCGX_Request* req,
+   struct WEBUTIL_PAGE* page, struct CCHAT_OP_DATA* op,
    bstring user_name, int user_id, bstring password_test, int* user_id_out_p,
    int* session_timeout_p, chatdb_iter_user_cb_t cb, bstring* err_msg_p
 ) {
@@ -468,7 +470,7 @@ int chatdb_iter_users(
    arg_struct.page = page;
    arg_struct.password_test = password_test;
    arg_struct.user_id_out_p = user_id_out_p;
-   arg_struct.req = req;
+   arg_struct.op = op;
    arg_struct.session_timeout_p = session_timeout_p;
 
    if( NULL != user_name ) {
@@ -497,7 +499,7 @@ int chatdb_iter_users(
       goto cleanup;
    }
 
-   retval = sqlite3_exec( db, query, chatdb_dbcb_users, &arg_struct, &err_msg );
+   retval = sqlite3_exec( op->db, query, chatdb_dbcb_users, &arg_struct, &err_msg );
    if( SQLITE_OK != retval ) {
       /* Return err_msg. */
       dbglog_error(
@@ -526,7 +528,7 @@ cleanup:
 }
 
 int chatdb_add_session(
-   sqlite3* db, int user_id, bstring remote_host, bstring* hash_p,
+   struct CCHAT_OP_DATA* op, int user_id, bstring remote_host, bstring* hash_p,
    bstring* err_msg_p
 ) {
    int retval = 0;
@@ -561,7 +563,7 @@ int chatdb_add_session(
       goto cleanup;
    }
 
-   retval = sqlite3_exec( db, query, NULL, NULL, &err_msg );
+   retval = sqlite3_exec( op->db, query, NULL, NULL, &err_msg );
    if( SQLITE_OK != retval ) {
       retval = RETVAL_DB;
       *err_msg_p = bfromcstr( err_msg );
@@ -612,7 +614,7 @@ cleanup:
 }
 
 int chatdb_iter_sessions(
-   struct WEBUTIL_PAGE* page, int* user_id_out_p, sqlite3* db,
+   struct WEBUTIL_PAGE* page, int* user_id_out_p, struct CCHAT_OP_DATA* op,
    bstring hash, bstring remote_host,
    chatdb_iter_session_cb_t cb, bstring* err_msg_p
 ) {
@@ -624,6 +626,8 @@ int chatdb_iter_sessions(
    arg_struct.cb_session = cb;
    arg_struct.page = page;
    arg_struct.user_id_out_p = user_id_out_p;
+
+   assert( NULL != op->db );
 
    query = sqlite3_mprintf(
       "select session_id, user_id, hash, hash_sz, remote_host, "
@@ -639,7 +643,7 @@ int chatdb_iter_sessions(
    }
 
    retval = sqlite3_exec(
-      db, query, chatdb_dbcb_sessions, &arg_struct, &err_msg );
+      op->db, query, chatdb_dbcb_sessions, &arg_struct, &err_msg );
    if( SQLITE_OK != retval ) {
       dbglog_error( "could not execute database session query: %s\n",
          err_msg );
@@ -668,7 +672,7 @@ cleanup:
 
 
 int chatdb_remove_session(
-   struct WEBUTIL_PAGE* page, sqlite3* db, bstring hash, bstring* err_msg_p
+   struct WEBUTIL_PAGE* page, struct CCHAT_OP_DATA* op, bstring hash, bstring* err_msg_p
 ) {
    int retval = 0;
    char* err_msg = NULL;
@@ -682,7 +686,7 @@ int chatdb_remove_session(
       goto cleanup;
    }
 
-   retval = sqlite3_exec( db, query, NULL, NULL, &err_msg );
+   retval = sqlite3_exec( op->db, query, NULL, NULL, &err_msg );
    if( SQLITE_OK != retval ) {
       dbglog_error( "could not execute database session delete: %s\n",
          err_msg );
@@ -733,7 +737,7 @@ int chatdb_dbcb_options( void* arg, int argc, char** argv, char **col ) {
 
 int chatdb_get_option(
    const char* key, union CHATDB_OPTION_VAL* val,
-   sqlite3* db, bstring* err_msg_p
+   struct CCHAT_OP_DATA* op, bstring* err_msg_p
 ) {
    int retval = 0;
    char* err_msg = NULL;
@@ -748,7 +752,7 @@ int chatdb_get_option(
    }
 
    retval = sqlite3_exec(
-      db, query, chatdb_dbcb_options, val, &err_msg );
+      op->db, query, chatdb_dbcb_options, val, &err_msg );
    if( SQLITE_OK != retval ) {
       dbglog_error( "could not execute database session query: %s\n",
          err_msg );
@@ -777,7 +781,7 @@ cleanup:
 
 int chatdb_set_option(
    const char* key, union CHATDB_OPTION_VAL* val, int format,
-   sqlite3* db, bstring* err_msg_p
+   struct CCHAT_OP_DATA* op, bstring* err_msg_p
 ) {
    int retval = 0;
    char* query = NULL;
@@ -814,7 +818,7 @@ int chatdb_set_option(
       key, bdata( value_set ), format );
    bcgi_check_null( query );
 
-   retval = sqlite3_exec( db, query, NULL, NULL, &err_msg );
+   retval = sqlite3_exec( op->db, query, NULL, NULL, &err_msg );
    if( SQLITE_OK != retval ) {
       retval = RETVAL_DB;
       if( NULL != err_msg_p ) {
