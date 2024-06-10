@@ -70,6 +70,9 @@ int bcgi_urldecode( bstring in, bstring* out_p );
 
 int bcgi_html_escape( bstring in, bstring* out_p );
 
+int bcgi_query_key_str(
+   bstring list_str, char split, const char* key, bstring* val_p );
+
 int bcgi_query_key( struct bstrList* array, const char* key, bstring* val_p );
 
 int bcgi_b64_decode( bstring in, unsigned char** out_p, size_t* out_sz_p );

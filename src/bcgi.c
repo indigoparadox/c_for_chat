@@ -170,6 +170,34 @@ cleanup:
    return retval;
 }
 
+int bcgi_query_key_str(
+   bstring list_str, char split_c, const char* key, bstring* val_p
+) {
+   int retval = 0;
+   struct bstrList* list = NULL;
+   size_t i = 0;
+   
+   /* Split the cookie string. */
+   list = bsplit( list_str, split_c );
+   bcgi_check_null( list );
+   dbglog_debug( 1, "split list \"%s\" (%d) on \"%c\": %d entries\n",
+      bdata( list_str ), blength( list_str ), split_c, list->qty );
+   for( i = 0 ; list->qty > i ; i++ ) {
+      btrimws( list->entry[i] );
+      dbglog_debug( 1, "entry %d: %s\n", i, bdata( list->entry[i] ) );
+   }
+
+   retval = bcgi_query_key( list, key, val_p );
+
+cleanup:
+
+   if( NULL != list ) {
+      bstrListDestroy( list );
+   }
+
+   return retval;
+}
+
 int bcgi_query_key( struct bstrList* array, const char* key, bstring* val_p ) {
    size_t i = 0;
    int retval = 0;

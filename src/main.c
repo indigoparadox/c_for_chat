@@ -25,19 +25,93 @@ enum lws_protocol_list {
 	PROTOCOL_CCHAT,
 };
 
+#define main_http_get_header( buffer, wsi, header ) \
+   assert( NULL == buffer ); \
+   buffer = bfromcstralloc( lws_hdr_total_length( wsi, header ) + 1, "" ); \
+   bcgi_check_null( buffer ); \
+   lws_hdr_copy( wsi, (char*)((buffer)->data), (buffer)->mlen, header ); \
+   buffer->slen = lws_hdr_total_length( wsi, header ); \
+   if( ':' == bchare( buffer, 0, ' ' ) ) { \
+      /* libws seems to be a bit sloppy about removing colons. */ \
+      buffer->data[0] = ' '; \
+      retval = btrimws( buffer ); \
+      bcgi_check_bstr_err( buffer ); \
+   }
+
 static 
 int main_cb_http(
    struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in,
    size_t len
 ) {
+   int retval = 0;
+   bstring cookies = NULL;
    dbglog_debug( 1, "cb_http called: %d\n", reason );
+   bstring session = NULL;
+   int auth_user_id = -1;
+   bstring remote_host = NULL; /* TODO */
 
-	return 0;
+   switch( reason ) {
+   case LWS_CALLBACK_HTTP:
+      break;
+
+   case LWS_CALLBACK_FILTER_PROTOCOL_CONNECTION:
+      if( 1 >= lws_hdr_total_length( wsi, WSI_TOKEN_HTTP_COOKIE ) ) {
+         /* Reject connections with no cookies! */
+         retval = RETVAL_AUTH;
+         goto cleanup;
+      }
+
+      /* Allocate a cookie buffer. */
+      main_http_get_header( cookies, wsi, WSI_TOKEN_HTTP_COOKIE );
+      main_http_get_header( remote_host, wsi, WSI_TOKEN_X_FORWARDED_FOR );
+
+      /*
+      remote_host = bfromcstralloc( 16, "" );
+      bcgi_check_null( remote_host );
+      lws_get_peer_simple( wsi, (char*)remote_host->data, 16 );
+      remote_host->slen = strlen( (char*)remote_host->data );
+      */
+
+      dbglog_debug( 1,
+         "websocket remote host: \"%s\"\n", bdata( remote_host ) );
+
+      /* See if a valid session exists (don't urldecode!). */
+      retval = bcgi_query_key_str( cookies, ';', "session", &session );
+      if( retval || NULL == session ) {
+         dbglog_debug( 1, "no session cookie found for websocket!\n" );
+         retval = RETVAL_AUTH;
+         goto cleanup;
+      }
+
+      /* Validate session with the database. */
+      /* TODO: Database mutex! */
+      dbglog_debug( 2, "session cookie found: %s\n", bdata( session ) );
+      chatdb_iter_sessions(
+         NULL, &auth_user_id, g_db, session,
+         remote_host, cchat_auth_session_cb, NULL );
+
+      if( 0 > auth_user_id ) {
+         dbglog_debug( 1, "invalid websocket user: %d\n", auth_user_id );
+         retval = RETVAL_AUTH;
+      }
+
+      break;
+
+   default:
+      break;
+   }
+
+cleanup:
+
+   bcgi_cleanup_bstr( cookies, likely );
+   bcgi_cleanup_bstr( session, likely );
+   bcgi_cleanup_bstr( remote_host, likely );
+
+	return retval;
 }
 
 struct lws_protocols lws_protocol_info[] = {
    { "http-only", main_cb_http, 0, 0 },
-   { "cchat-protocol", cchat_lws_cb, 0, CCHAT_LWS_BUFFER_SZ_MAX },
    { NULL, NULL, 0, 0 }
 };
 

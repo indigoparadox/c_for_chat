@@ -1041,23 +1041,3 @@ cleanup:
    return retval;
 }
 
-int cchat_lws_cb(
-   struct lws* wsi, enum lws_callback_reasons reason, void *user, void *in,
-   size_t len
-) {
-   int retval = 0;
-   bstring buffer = NULL;
-
-   switch( reason ) {
-   case LWS_CALLBACK_RECEIVE:
-      buffer = blk2bstr( in, len );
-      dbglog_debug( 1, "recv: %s\n", bdata( buffer ) );
-      break;
-
-   default:
-      break;
-   }
-
-   return 0;
-}
-
