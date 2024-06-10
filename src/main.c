@@ -8,6 +8,7 @@
 #include <unistd.h> /* for getopt() */
 #include <signal.h>
 
+#include <pthread.h>
 #include <curl/curl.h>
 
 extern bstring g_recaptcha_site_key;
@@ -16,6 +17,29 @@ extern bstring g_recaptcha_secret_key;
 static int g_cgi_sock = -1;
 FCGX_Request g_req;
 sqlite3* g_db = NULL;
+struct lws_context* g_lws_ctx = NULL;
+int g_lws_running = 1;
+
+enum lws_protocol_list {
+	PROTOCOL_HTTP = 0,
+	PROTOCOL_CCHAT,
+};
+
+static 
+int main_cb_http(
+   struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in,
+   size_t len
+) {
+   dbglog_debug( 1, "cb_http called: %d\n", reason );
+
+	return 0;
+}
+
+struct lws_protocols lws_protocol_info[] = {
+   { "http-only", main_cb_http, 0, 0 },
+   { "cchat-protocol", cchat_lws_cb, 0, CCHAT_LWS_BUFFER_SZ_MAX },
+   { NULL, NULL, 0, 0 }
+};
 
 void main_shutdown( int sig ) {
 
@@ -26,10 +50,8 @@ void main_shutdown( int sig ) {
       chatdb_close( &g_db );
    }
 
-#ifdef USE_WEBSOCKETS
    dbglog_debug( 1, "shutting down socket server...\n" );
-   socksrv_stop();
-#endif /* USE_WEBSOCKETS */
+   lws_context_destroy( g_lws_ctx );
 
    if( 0 <= g_cgi_sock ) {
       dbglog_debug( 1, "shutting down FastCGI...\n" );
@@ -45,12 +67,29 @@ void main_shutdown( int sig ) {
    exit( 0 );
 }
 
+static void* main_lws_handler( void* v_ctx ) {
+
+   while( g_lws_running ) {
+      lws_service( g_lws_ctx, 10000 );
+   }
+
+   return NULL;
+}
+
 int main( int argc, char* argv[] ) {
    int retval = 0;
    struct tagbstring chatdb_path = bsStatic( "chat.db" );
    int o = 0;
    bstring log_path = NULL;
    bstring server_listen = NULL;
+   struct lws_context_creation_info lws_info;
+   pthread_t sock_thd = -1;
+
+   memset( &lws_info, 0, sizeof( struct lws_context_creation_info ) );
+   lws_info.gid = -1;
+   lws_info.uid = -1;
+   lws_info.port = 9777;
+   lws_info.protocols = lws_protocol_info;
 
    /* Parse args. */
    while( -1 != (o = getopt( argc, argv, "l:d:s:" )) ) {
@@ -66,6 +105,10 @@ int main( int argc, char* argv[] ) {
 
       case 'd':
          g_dbglog_level = atoi( optarg );
+         break;
+
+      case 'w':
+         lws_info.port = atoi( optarg );
          break;
 
       case 's':
@@ -126,13 +169,16 @@ int main( int argc, char* argv[] ) {
    FCGX_Init();
    memset( &g_req, 0, sizeof( FCGX_Request ) );
 
-#ifdef USE_WEBSOCKETS
    dbglog_debug( 3, "starting socket server...\n" );
-   retval = socksrv_listen();
-   if( retval ) {
+
+   g_lws_ctx = lws_create_context( &lws_info );
+
+   if( pthread_create( &sock_thd, NULL, main_lws_handler, g_lws_ctx ) ) {
+      dbglog_error( "error creating client socket thread!\n" );
+      /* TODO: Close client socket? */
+      retval = RETVAL_ALLOC;
       goto cleanup;
    }
-#endif /* USE_WEBSOCKETS */
 
    dbglog_debug( 4, "listening on %s...\n", bdata( server_listen ) );
 

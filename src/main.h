@@ -8,6 +8,7 @@
 
 #include <fcgi_stdio.h>
 #include <sqlite3.h>
+#include <libwebsockets.h>
 
 #include "bstrlib.h"
 #include "retval.h"
@@ -17,7 +18,6 @@
 #include "cchat.h"
 #include "chatdb.h"
 #include "dbglog.h"
-#include "socksrv.h"
 
 #endif /* !MAIN_H */
 

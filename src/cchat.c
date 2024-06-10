@@ -233,9 +233,8 @@ int cchat_route_profile(
 
 cleanup:
 
-   if( NULL != page.text ) {
-      bdestroy( page.text );
-   }
+   bcgi_cleanup_bstr( page.scripts, likely );
+   bcgi_cleanup_bstr( page.text, likely );
 
    return retval;
 }
@@ -421,6 +420,7 @@ int cchat_route_login(
 cleanup:
 
    bcgi_cleanup_bstr( page.text, likely );
+   bcgi_cleanup_bstr( page.scripts, likely );
 
    return retval;
 }
@@ -689,6 +689,8 @@ cleanup:
    return retval;
 }
 
+#define USE_WEBSOCKETS 1
+
 int cchat_route_chat(
    FCGX_Request* req, int auth_user_id,
    struct bstrList* q, struct bstrList* p, struct bstrList* c, sqlite3* db
@@ -805,6 +807,7 @@ int cchat_route_chat(
 
 cleanup:
 
+   bcgi_cleanup_bstr( page.scripts, likely );
    bcgi_cleanup_bstr( mini, likely );
    bcgi_cleanup_bstr( session, likely );
    bcgi_cleanup_bstr( page.text, likely );
@@ -1036,5 +1039,25 @@ cleanup:
    bcgi_cleanup_bstr( req_uri_raw, likely );
  
    return retval;
+}
+
+int cchat_lws_cb(
+   struct lws* wsi, enum lws_callback_reasons reason, void *user, void *in,
+   size_t len
+) {
+   int retval = 0;
+   bstring buffer = NULL;
+
+   switch( reason ) {
+   case LWS_CALLBACK_RECEIVE:
+      buffer = blk2bstr( in, len );
+      dbglog_debug( 1, "recv: %s\n", bdata( buffer ) );
+      break;
+
+   default:
+      break;
+   }
+
+   return 0;
 }
 

@@ -3,7 +3,7 @@
 
 CCHAT_SOURCES := src/main.c src/bstrlib.c src/cchat.c src/chatdb.c src/bcgi.c src/webutil.c
 
-PKG_CFG_DEPS := sqlite3 libcurl openssl libcrypto
+PKG_CFG_DEPS := sqlite3 libcurl openssl libcrypto libwebsockets
 
 CFLAGS_DEBUG := -DDEBUG -Wall -g -fsanitize=undefined -fsanitize=leak -fsanitize=address
 
@@ -30,9 +30,8 @@ CFLAGS := $(INCLUDES)
 LDFLAGS := -static $(LIBS) $(LIBS_STATIC_DEPS)
 else
 ifeq ("$(BUILD)", "DEBUG")
-CFLAGS := $(CFLAGS_DEBUG) $(INCLUDES) -DUSE_WEBSOCKETS
+CFLAGS := $(CFLAGS_DEBUG) $(INCLUDES)
 LDFLAGS := $(LDFLAGS_DEBUG) $(LIBS)
-CCHAT_SOURCES += src/socksrv.c
 else
 CFLAGS := $(INCLUDES)
 LDFLAGS := $(LIBS)
