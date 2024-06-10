@@ -23,6 +23,56 @@ enum lws_protocol_list {
 	PROTOCOL_CCHAT,
 };
 
+static struct RTPROTO_CLIENT* main_lws_client_get(
+   struct CCHAT_OP_DATA* op, struct lws* wsi
+) {
+   struct RTPROTO_CLIENT* out = NULL;
+   size_t i = 0;
+   
+   for( i = 0 ; op->clients_sz > i ; i++ ) {
+      if( wsi == op->clients[i].wsi ) {
+         out = &(op->clients[i]);
+         break;
+      }
+   }
+
+   return out;
+}
+
+int main_lws_client_delete( struct CCHAT_OP_DATA* op, struct lws* wsi ) {
+   int retval = 0;
+   size_t i = 0;
+
+   for( i = 0 ; op->clients_sz > i ; i++ ) {
+      if( wsi != op->clients[i].wsi ) {
+         continue;
+      }
+
+      retval = rtproto_client_delete( op, i );
+      break;
+   }
+
+   return retval;
+}
+
+int main_lws_client_add(
+   struct CCHAT_OP_DATA* op, struct lws* wsi, int auth_user_id
+) {
+   int retval = 0;
+   ssize_t idx_new = -1;
+
+   retval = rtproto_client_add( op, auth_user_id, &idx_new );
+   if( retval || 0 > idx_new ) {
+      goto cleanup;
+   }
+
+   op->clients[idx_new].wsi = wsi;
+
+cleanup:
+
+   return retval;
+}
+
 #define main_http_get_header( buffer, wsi, header ) \
    assert( NULL == buffer ); \
    buffer = bfromcstralloc( lws_hdr_total_length( wsi, header ) + 1, "" ); \
@@ -37,26 +87,27 @@ enum lws_protocol_list {
    }
 
 static 
-int main_cb_http(
+int main_cb_cchat(
    struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in,
    size_t len
 ) {
    int retval = 0;
    bstring cookies = NULL;
-   dbglog_debug( 1, "cb_http called: %d\n", reason );
    bstring session = NULL;
+   bstring line = NULL;
    int auth_user_id = -1;
    bstring remote_host = NULL; /* TODO */
    struct CCHAT_OP_DATA* op = NULL;
+   struct lws_context* ctx = NULL;
+   struct RTPROTO_CLIENT* client = NULL;
 
-   op = lws_context_user( lws_get_context( wsi ) );
+   dbglog_debug( 1, "cb_cchat called: %d\n", reason );
 
+   ctx = lws_get_context( wsi );
+   op = lws_context_user( ctx );
    assert( NULL != op );
 
    switch( reason ) {
-   case LWS_CALLBACK_HTTP:
-      break;
-
    case LWS_CALLBACK_FILTER_PROTOCOL_CONNECTION:
       if( 1 >= lws_hdr_total_length( wsi, WSI_TOKEN_HTTP_COOKIE ) ) {
          /* Reject connections with no cookies! */
@@ -87,7 +138,6 @@ int main_cb_http(
       }
 
       /* Validate session with the database. */
-      /* TODO: Database mutex! */
       dbglog_debug( 2, "session cookie found: %s\n", bdata( session ) );
       chatdb_iter_sessions(
          NULL, &auth_user_id, op, session,
@@ -98,6 +148,35 @@ int main_cb_http(
          retval = RETVAL_AUTH;
       }
 
+      retval = main_lws_client_add( op, wsi, auth_user_id );
+
+      break;
+
+   case LWS_CALLBACK_RECEIVE:
+      client = main_lws_client_get( op, wsi );
+      bcgi_check_null( client );
+      line = blk2bstr( in, len );
+      bcgi_check_null( line );
+      rtproto_command( op, client->auth_user_id, line );
+      break;
+
+   case LWS_CALLBACK_SERVER_WRITEABLE:
+      /* Get the client. */
+      client = main_lws_client_get( op, wsi );
+      bcgi_check_null( client );
+      assert( NULL != client->buffer );
+
+      assert( NULL == line );
+      line = bfromcstralloc( blength( client->buffer ) + LWS_PRE, "" );
+      bcgi_check_null( line );
+      strncpy(
+         (char*)&(line->data[LWS_PRE]),
+         (char*)(client->buffer->data), blength( client->buffer ) );
+      line->slen = LWS_PRE + blength( client->buffer );
+
+      lws_write( wsi,
+         (unsigned char*)&(line->data[LWS_PRE]), line->slen - LWS_PRE,
+         LWS_WRITE_TEXT );
       break;
 
    default:
@@ -106,15 +185,39 @@ int main_cb_http(
 
 cleanup:
 
+   dbglog_debug( 1, "callback complete!\n" );
+
    bcgi_cleanup_bstr( cookies, likely );
    bcgi_cleanup_bstr( session, likely );
    bcgi_cleanup_bstr( remote_host, likely );
+   bcgi_cleanup_bstr( line, likely );
+
+   return retval;
+}
+
+static 
+int main_cb_http(
+   struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in,
+   size_t len
+) {
+   int retval = 0;
+
+   dbglog_debug( 1, "cb_http called: %d\n", reason );
+
+   switch( reason ) {
+   case LWS_CALLBACK_HTTP:
+      break;
+
+   default:
+      break;
+   }
 
 	return retval;
 }
 
 struct lws_protocols lws_protocol_info[] = {
    { "http-only", main_cb_http, 0, 0 },
+   { "cchat-protocol", main_cb_cchat, 0, 0 },
    { NULL, NULL, 0, 0 }
 };
 
@@ -133,6 +236,14 @@ void main_shutdown( int sig ) {
 
    dbglog_debug( 1, "shutting down socket server...\n" );
    lws_context_destroy( g_lws_ctx );
+
+   if( NULL != g_op->clients ) {
+      while( 0 < g_op->clients_sz ) {
+         rtproto_client_delete( g_op, 0 );
+      }
+      free( g_op->clients );
+      g_op->clients = NULL;
+   }
 
    if( 0 <= g_cgi_sock ) {
       dbglog_debug( 1, "shutting down FastCGI...\n" );

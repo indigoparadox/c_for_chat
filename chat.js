@@ -2,7 +2,12 @@
 var sock;
 
 $(document).ready( function() {
-   sock = new WebSocket( "ws://zarchat.interfinitydynamics.info/chat_sock" );
+   sock = new WebSocket(
+      "ws://zarchat.interfinitydynamics.info/chat_sock", "cchat-protocol" );
+
+   sock.onmessage = function( e ) {
+      console.log( "receive: " + e.data );
+   };
 
    sock.onopen = function( e ) {
       console.log( 'socket open!' );
