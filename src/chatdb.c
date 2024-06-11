@@ -17,20 +17,10 @@
    }
 
 #define CHATDB_USER_TABLE_DB_FIELDS( idx, field, c_type, db_type ) \
-   static const struct tagbstring \
-      _chatdb_field_users_ ## field = bsStatic( #field " " db_type );
+   #field " " db_type "|"
 
-CHATDB_USER_TABLE( CHATDB_USER_TABLE_DB_FIELDS );
-
-#define CHATDB_USER_TABLE_DB_FIELDS_LIST( idx, field, c_type, db_type ) \
-   &_chatdb_field_users_ ## field,
-
-static const struct bstrList _gc_chatdb_fields_users = {
-   9, 9,
-   {
-      CHATDB_USER_TABLE( CHATDB_USER_TABLE_DB_FIELDS_LIST )
-   }
-};
+const static struct tagbstring _gc_chatdb_fields_users = 
+   bsStatic( CHATDB_USER_TABLE( CHATDB_USER_TABLE_DB_FIELDS ) );
 
 struct CHATDB_ARG {
    chatdb_iter_msg_cb_t cb_msg;
@@ -42,6 +32,36 @@ struct CHATDB_ARG {
    int* user_id_out_p;
    struct CHATDB_USER* user;
 };
+
+static int _chatdb_build_insert(
+   bstring* query_p, const_bstring fields, const char* table_name
+) {
+   int retval = 0;
+   struct bstrList* query_list = NULL;
+   bstring list_str = NULL;
+
+   assert( NULL == *query_p );
+   
+   /* Split field list and join it with commas. */
+   query_list = bsplit( &_gc_chatdb_fields_users, '|' );
+   bcgi_check_null( query_list );
+   list_str = bjoinStatic( query_list, ", " );
+   bcgi_check_null( list_str );
+   retval = btrunc( list_str, blength( list_str ) - 2 /* Trim off ", " */ );
+   bcgi_check_bstr_err( list_str );
+
+   *query_p = bformat( "create table if not exists %s( %s );",
+      table_name, bdata( list_str ) );
+   bcgi_check_null( *query_p );
+
+cleanup:
+
+   bcgi_cleanup_bstr( list_str, likely );
+
+   bstrListDestroy( query_list );
+
+   return retval;
+}
 
 int chatdb_init( bstring path, struct CCHAT_OP_DATA* op ) {
    int retval = 0;
@@ -85,17 +105,16 @@ int chatdb_init( bstring path, struct CCHAT_OP_DATA* op ) {
          ");\n" );
 #endif
 
-   query = bjoinStatic( &_gc_chatdb_fields_users, "," );
-   bcgi_check_null( query );
-
-   dbglog_debug( 1, "%s\n", bdata( query ) );
-   
-   exit( 1 );
-
    /* Create user table if it doesn't exist. */
+   retval = _chatdb_build_insert( &query, &_gc_chatdb_fields_users, "users" );
+   if( retval ) {
+      goto cleanup;
+   }
    pthread_mutex_lock( &(op->db_mutex) );
    retval = sqlite3_exec( op->db, bdata( query ), NULL, 0, &err_msg );
    pthread_mutex_unlock( &(op->db_mutex) );
+   bdestroy( query );
+   query = NULL;
    if( SQLITE_OK != retval ) {
       dbglog_error( "could not create database user table: %s\n", err_msg );
       retval = RETVAL_DB;
@@ -639,6 +658,9 @@ int chatdb_add_session(
       retval = RETVAL_ALLOC;
       goto cleanup;
    }
+
+   /* XXX */
+   dbglog_debug( 1, "%s\n", query );
 
    pthread_mutex_lock( &(op->db_mutex) );
    retval = sqlite3_exec( op->db, query, NULL, NULL, &err_msg );

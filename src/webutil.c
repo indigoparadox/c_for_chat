@@ -152,17 +152,9 @@ int webutil_show_page(
 
 cleanup:
 
-   if( NULL == err_msg_decoded ) {
-      bdestroy( err_msg_decoded );
-   }
-
-   if( NULL == err_msg_escaped ) {
-      bdestroy( err_msg_escaped );
-   }
-
-   if( NULL == err_msg ) {
-      bdestroy( err_msg );
-   }
+   bcgi_cleanup_bstr( err_msg_decoded, unlikely );
+   bcgi_cleanup_bstr( err_msg_escaped, unlikely );
+   bcgi_cleanup_bstr( err_msg, unlikely );
 
    /* Close page. */
    if( WEBUTIL_PAGE_FLAG_NOBODY != (WEBUTIL_PAGE_FLAG_NOBODY & page->flags) ) {
@@ -253,6 +245,32 @@ cleanup:
    if( curl ) {
       curl_easy_cleanup( curl );
    }
+
+   return retval;
+}
+
+int webutil_get_cookies( struct bstrList** out_p, struct CCHAT_OP_DATA* op ) {
+   bstring cookies = NULL;
+   int retval = 0;
+   size_t i = 0;
+
+   cookies = bfromcstr( FCGX_GetParam( "HTTP_COOKIE", op->req.envp ) );
+   if( NULL == cookies ) {
+      dbglog_debug( 1, "no cookies present!\n" );
+      retval = RETVAL_PARAMS;
+      goto cleanup;
+   }
+
+   *out_p = bsplit( cookies, ';' );
+   bcgi_check_null( *out_p );
+   for( i = 0 ; (*out_p)->qty > i ; i++ ) {
+      btrimws( (*out_p)->entry[i] );
+      dbglog_debug( 1, "cookie: %s\n", bdata( (*out_p)->entry[i] ) );
+   }
+
+cleanup:
+
+   bcgi_cleanup_bstr( cookies, likely );
 
    return retval;
 }

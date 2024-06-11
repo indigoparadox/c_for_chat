@@ -28,5 +28,7 @@ int webutil_add_script( struct WEBUTIL_PAGE* page, const char* script );
 
 int webutil_check_recaptcha( FCGX_Request* req, bstring recaptcha );
 
+int webutil_get_cookies( struct bstrList** out_p, struct CCHAT_OP_DATA* op );
+
 #endif /* !WEBUTIL_H */
 

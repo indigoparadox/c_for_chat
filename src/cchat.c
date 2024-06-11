@@ -71,6 +71,8 @@ static int cchat_profile_form(
 ) {
    int retval = 0;
 
+   assert( NULL == user_name || NULL != session );
+
    retval = bassignformat(
       page->text,
       "<div class=\"profile-form\">\n"
@@ -159,21 +161,16 @@ int cchat_profile_user_cb(
    bstring req_cookie = NULL;
    struct bstrList* c = NULL;
 
-   req_cookie = bfromcstr( FCGX_GetParam( "HTTP_COOKIE", op->req.envp ) );
-   if( NULL == req_cookie ) {
-      dbglog_error( "no cookie provided to user validator!\n" );
-      retval = RETVAL_PARAMS;
+   if( webutil_get_cookies( &c, op ) ) {
       goto cleanup;
    }
-
-   c = bsplit( req_cookie, '&' );
-   bcgi_check_null( c );
 
    /* See if a valid session exists (don't urldecode!). */
    retval = bcgi_query_key( c, "session", &session );
    if( retval ) {
       goto cleanup;
    }
+   dbglog_debug( 1, "profile session: %s\n", bdata( session ) );
 
    retval = cchat_profile_form(
       page, user->user_name, user->email, session, user->session_timeout );
@@ -470,10 +467,8 @@ int cchat_route_auth(
    bstring err_msg = NULL;
    bstring hash = NULL;
    bstring remote_host = NULL;
-   int user_id = -1;
    bstring recaptcha = NULL;
    bstring recaptcha_decode = NULL;
-   int session_timeout = 0;
    struct CHATDB_USER user_obj;
 
    memset( &user_obj, '\0', sizeof( struct CHATDB_USER ) );
@@ -512,7 +507,7 @@ int cchat_route_auth(
    user_obj.user_id = -1;
    retval = chatdb_iter_users(
       NULL, op, password_decode, &user_obj, cchat_auth_user_cb, &err_msg );
-   if( retval || 0 > user_id ) {
+   if( retval || 0 > user_obj.user_id ) {
       if( NULL != err_msg ) {
          retval = bassigncstr( err_msg, "Invalid username or password!" );
          bcgi_check_bstr_err( err_msg );
@@ -525,7 +520,8 @@ int cchat_route_auth(
 
    remote_host = bfromcstr( FCGX_GetParam( "REMOTE_ADDR", op->req.envp ) );
 
-   retval = chatdb_add_session( op, user_id, remote_host, &hash, &err_msg );
+   retval = chatdb_add_session(
+      op, user_obj.user_id, remote_host, &hash, &err_msg );
    if( retval ) {
       assert( NULL != err_msg );
       goto cleanup;
@@ -534,8 +530,9 @@ int cchat_route_auth(
    dbglog_debug( 2, "setting authorized session cookie: %s\n", bdata( hash ) );
 
    /* Set auth cookie. */
-   FCGX_FPrintF( op->req.out, "Set-Cookie: session=%s; Max-Age=%d; HttpOnly\r\n",
-      bdata( hash ), session_timeout );
+   FCGX_FPrintF( op->req.out,
+      "Set-Cookie: session=%s; Max-Age=%d; HttpOnly\r\n",
+      bdata( hash ), user_obj.session_timeout );
 
 cleanup:
 
@@ -897,7 +894,6 @@ int cchat_handle_req( struct CCHAT_OP_DATA* op ) {
    bstring req_uri_raw = NULL;
    bstring req_query = NULL;
    bstring post_buf = NULL;
-   bstring req_cookie = NULL;
    bstring session = NULL;
    bstring remote_host = NULL;
    size_t post_buf_sz = 0;
@@ -940,16 +936,7 @@ int cchat_handle_req( struct CCHAT_OP_DATA* op ) {
    req_query_list = bsplit( req_query, '&' );
 
    /* Get cookies and split into list. */
-   req_cookie = bfromcstr( FCGX_GetParam( "HTTP_COOKIE", op->req.envp ) );
-   if( NULL != req_cookie ) {
-      /* Split the cookie string. */
-      req_cookie_list = bsplit( req_cookie, ';' );
-      bcgi_check_null( req_cookie_list );
-      for( i = 0 ; req_cookie_list->qty > i ; i++ ) {
-         btrimws( req_cookie_list->entry[i] );
-         dbglog_debug( 1, "cookie: %s\n", bdata( req_cookie_list->entry[i] ) );
-      }
-
+   if( !webutil_get_cookies( &req_cookie_list, op ) ) {
       /* See if a valid session exists (don't urldecode!). */
       retval = bcgi_query_key( req_cookie_list, "session", &session );
       if( !retval && NULL != session ) {
@@ -958,8 +945,6 @@ int cchat_handle_req( struct CCHAT_OP_DATA* op ) {
             NULL, &auth_user_id, op, session,
             remote_host, cchat_auth_session_cb, NULL );
       }
-   } else {
-      dbglog_debug( 3, "no cookies present!\n" );
    }
 
    /* Get POST data (if any). */
@@ -994,6 +979,7 @@ int cchat_handle_req( struct CCHAT_OP_DATA* op ) {
    }
 
    /* Determine if a valid route was provided using LUTs above. */
+   i = 0;
    while( 0 != blength( &(gc_cchat_route_paths[i]) ) ) {
       if( 0 == bstrcmp( &(gc_cchat_route_paths[i]), req_uri_raw ) ) {
          break;
@@ -1033,7 +1019,6 @@ cleanup:
    bcgi_cleanup_bstr( remote_host, likely );
    bcgi_cleanup_bstr( post_buf, likely );
    bcgi_cleanup_bstr( session, likely );
-   bcgi_cleanup_bstr( req_cookie, likely );
    bcgi_cleanup_bstr( req_query, likely );
    bcgi_cleanup_bstr( req_method, likely );
    bcgi_cleanup_bstr( req_uri_raw, likely );
