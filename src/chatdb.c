@@ -17,7 +17,26 @@
    }
 
 #define CHATDB_USER_TABLE_DB_FIELDS( idx, field, c_type, db_type ) \
-   #field " " db_type "|"
+   #field "*" db_type "|"
+
+#define _chatdb_alter_table( version, db, mutex, alter_stmt ) \
+      pthread_mutex_lock( mutex ); \
+      retval = sqlite3_exec( db, alter_stmt, NULL, 0, &err_msg ); \
+      pthread_mutex_unlock( mutex ); \
+      if( SQLITE_OK != retval ) { \
+         dbglog_error( "could not update table: %s\n", err_msg ); \
+         retval = RETVAL_DB; \
+         sqlite3_free( err_msg ); \
+         goto cleanup; \
+      } \
+      schema_ver.integer = version; \
+      retval = chatdb_set_option(  \
+         "schema_version", &schema_ver, CHATDB_OPTION_FMT_INT, op, NULL ); \
+      if( retval ) { \
+         dbglog_error( "error setting schema version!\n" ); \
+         goto cleanup; \
+      } \
+      dbglog_debug( 9, "updated schema version: %d\n", schema_ver.integer );
 
 const static struct tagbstring _gc_chatdb_fields_users = 
    bsStatic( CHATDB_USER_TABLE( CHATDB_USER_TABLE_DB_FIELDS ) );
@@ -33,22 +52,52 @@ struct CHATDB_ARG {
    struct CHATDB_USER* user;
 };
 
-static int _chatdb_build_insert(
+static int _chatdb_build_split_fields(
+   struct bstrList** lst_p, const_bstring fields
+) {
+   int retval = 0;
+
+   assert( NULL == *lst_p );
+
+   /* Split field list and join it with commas. */
+   *lst_p = bsplit( &_gc_chatdb_fields_users, '|' );
+   bcgi_check_null( *lst_p );
+
+   /* Delete empty last entry. */
+   assert( (*lst_p)->qty > 1 );
+   bdestroy( (*lst_p)->entry[(*lst_p)->qty - 1] );
+   (*lst_p)->qty--;
+
+cleanup:
+ 
+   return 0;
+}
+
+static int _chatdb_build_create_table(
    bstring* query_p, const_bstring fields, const char* table_name
 ) {
    int retval = 0;
    struct bstrList* query_list = NULL;
    bstring list_str = NULL;
+   size_t i = 0;
 
    assert( NULL == *query_p );
+
+   retval = _chatdb_build_split_fields( &query_list, fields );
+   if( retval ) {
+      goto cleanup;
+   }
    
-   /* Split field list and join it with commas. */
-   query_list = bsplit( &_gc_chatdb_fields_users, '|' );
-   bcgi_check_null( query_list );
+   /* Replace star separators with spaces. */
+   for( i = 0 ; query_list->qty > i ; i++ ) {
+      assert( NULL != query_list->entry[i]->data );
+      assert( BSTR_ERR != bstrchr( query_list->entry[i], '*' ) );
+      query_list->entry[i]->data[bstrchr( query_list->entry[i], '*' )] = ' ';
+   }
+
+   /* Join split field names into list. */
    list_str = bjoinStatic( query_list, ", " );
    bcgi_check_null( list_str );
-   retval = btrunc( list_str, blength( list_str ) - 2 /* Trim off ", " */ );
-   bcgi_check_bstr_err( list_str );
 
    *query_p = bformat( "create table if not exists %s( %s );",
       table_name, bdata( list_str ) );
@@ -59,6 +108,145 @@ cleanup:
    bcgi_cleanup_bstr( list_str, likely );
 
    bstrListDestroy( query_list );
+
+   return retval;
+}
+
+static int _chatdb_build_insert(
+   bstring* query_p, const_bstring fields, const char* table_name
+) {
+   int retval = 0;
+   struct bstrList* field_list = NULL;
+   struct bstrList* key_list = NULL;
+   bstring key_str = NULL;
+   int sep_pos = 0;
+   size_t i = 0;
+   const struct tagbstring cs_integer = bsStatic( "integer" );
+   const struct tagbstring cs_text = bsStatic( "text" );
+   const struct tagbstring cs_datetime = bsStatic( "datetime" );
+   const struct tagbstring cs_primary = bsStatic( "primary key" );
+   struct bstrList* fmt_list = NULL;
+   struct bstrList* update_list = NULL;
+   bstring fmt_str = NULL;
+   bstring primary_key = NULL;
+   bstring update_str = NULL;
+
+   assert( NULL == *query_p );
+
+   retval = _chatdb_build_split_fields( &field_list, fields );
+   if( retval ) {
+      goto cleanup;
+   }
+
+   /* Create a list to hold contingency update statements. */
+   update_list = bstrListCreate();
+   bcgi_check_null( update_list );
+   retval = bstrListAlloc( update_list, field_list->qty );
+   bcgi_check_bstr_err( update_list );
+
+   /* Create a list to hold truncated keys to used fields. */
+   key_list = bstrListCreate();
+   bcgi_check_null( key_list );
+   retval = bstrListAlloc( key_list, field_list->qty );
+   bcgi_check_bstr_err( key_list );
+
+   /* Create a string list to hold format string tokens. */
+   fmt_list = bstrListCreate();
+   bcgi_check_null( fmt_list );
+   retval = bstrListAlloc( fmt_list, field_list->qty );
+   bcgi_check_bstr_err( fmt_list );
+
+   for( i = 0 ; field_list->qty > i ; i++ ) {
+      assert( NULL != field_list->entry[i]->data );
+
+      sep_pos = bstrchr( field_list->entry[i], '*' );
+      assert( BSTR_ERR != sep_pos );
+      
+      /* Check for valid field types and build fmt_list if valid. */
+      if(
+         BSTR_ERR != binstrcaseless(
+            field_list->entry[i], sep_pos, &cs_primary )
+      ) {
+         dbglog_debug( 1, "skipping primary key: %s\n",
+            bdata( field_list->entry[i] ) );
+         primary_key = bmidstr( field_list->entry[i], 0, sep_pos );
+         bcgi_check_null( primary_key );
+         continue;
+      } else if(
+         BSTR_ERR != binstrcaseless(
+            field_list->entry[i], sep_pos, &cs_datetime )
+      ) {
+         dbglog_debug( 1, "skipping datetime field: %s\n",
+            bdata( field_list->entry[i] ) );
+         continue;
+      } else if(
+         BSTR_ERR != binstrcaseless(
+            field_list->entry[i], sep_pos, &cs_text )
+      ) {
+         fmt_list->entry[fmt_list->qty++] = bfromcstr( "'%q'" );
+      } else if(
+         BSTR_ERR != binstrcaseless(
+            field_list->entry[i], sep_pos, &cs_integer )
+      ) {
+         fmt_list->entry[fmt_list->qty++] = bfromcstr( "%d" );
+      } else {
+         dbglog_error( "invalid db type: %s\n", bdata( field_list->entry[i] ) );
+         continue;
+      }
+
+      /* Build contingency update statement. */
+      update_list->entry[update_list->qty] = bmidstr(
+         field_list->entry[i], 0, sep_pos );
+      bcgi_check_null( update_list->entry[update_list->qty] );
+      retval = bcatcstr( update_list->entry[update_list->qty], "=" );
+      bcgi_check_bstr_err( update_list->entry[update_list->qty] );
+      retval = bconcat( update_list->entry[update_list->qty],
+         fmt_list->entry[fmt_list->qty - 1] );
+      bcgi_check_bstr_err( update_list->entry[update_list->qty] );
+      update_list->qty++;
+
+      /* Truncate properties after star separators. */
+      key_list->entry[key_list->qty++] = bmidstr(
+         field_list->entry[i], 0, sep_pos );
+      bcgi_check_null( key_list->entry[key_list->qty - 1] );
+   }
+
+   bcgi_check_null( primary_key );
+   
+   key_str = bjoinStatic( key_list, ", " );
+   fmt_str = bjoinStatic( fmt_list, ", " );
+   update_str = bjoinStatic( update_list, ", " );
+
+   /* Build the query string. */
+   *query_p = bformat( "insert into users (%s) values (%s) "
+      "on conflict set %s where excluded.%s = %s;",
+      bdata( key_str ), bdata( fmt_str ),
+      bdata( update_str ), bdata( primary_key ), bdata( primary_key ) );
+
+   dbglog_debug( 1, "insert query: %s\n", bdata( *query_p ) );
+
+cleanup:
+
+   bcgi_cleanup_bstr( fmt_str, likely );
+   bcgi_cleanup_bstr( key_str, likely );
+   bcgi_cleanup_bstr( update_str, likely );
+   bcgi_cleanup_bstr( primary_key, likely );
+
+   if( NULL != key_list ) {
+      bstrListDestroy( update_list );
+   }
+
+   if( NULL != fmt_list ) {
+      bstrListDestroy( fmt_list );
+   }
+
+   if( NULL != key_list ) {
+      bstrListDestroy( key_list );
+   }
+
+   if( NULL != field_list ) {
+      bstrListDestroy( field_list );
+   }
 
    return retval;
 }
@@ -96,17 +284,9 @@ int chatdb_init( bstring path, struct CCHAT_OP_DATA* op ) {
       goto cleanup;
    }
 
-#if 0
-   #define CHATDB_USER_TABLE_DB_FIELDS( idx, field, c_type, db_type ) \
-      #field " " db_type ", "
-
-   dbglog_debug( 1, "create table if not exists users( "
-         CHATDB_USER_TABLE( CHATDB_USER_TABLE_DB_FIELDS )
-         ");\n" );
-#endif
-
    /* Create user table if it doesn't exist. */
-   retval = _chatdb_build_insert( &query, &_gc_chatdb_fields_users, "users" );
+   retval = _chatdb_build_create_table(
+      &query, &_gc_chatdb_fields_users, "users" );
    if( retval ) {
       goto cleanup;
    }
@@ -169,25 +349,17 @@ int chatdb_init( bstring path, struct CCHAT_OP_DATA* op ) {
    switch( schema_ver.integer ) {
    case 0:
       /* Bring up to version one. */
-      pthread_mutex_lock( &(op->db_mutex) );
-      retval = sqlite3_exec( op->db,
-         "alter table users add column session_timeout integer default 3600",
-         NULL, 0, &err_msg );
-      pthread_mutex_unlock( &(op->db_mutex) );
-      if( SQLITE_OK != retval ) {
-         dbglog_error( "could not update users table: %s\n", err_msg );
-         retval = RETVAL_DB;
-         sqlite3_free( err_msg );
-         goto cleanup;
-      }
-      schema_ver.integer = 1;
-      retval = chatdb_set_option( 
-         "schema_version", &schema_ver, CHATDB_OPTION_FMT_INT, op, NULL );
-      if( retval ) {
-         dbglog_error( "error setting schema version!\n" );
-         goto cleanup;
-      }
-      dbglog_debug( 9, "updated schema version: %d\n", schema_ver.integer );
+      _chatdb_alter_table( 1, op->db, &(op->db_mutex),
+         "alter table users add column session_timeout integer default 3600" );
+      /* Fall through. */
+
+   case 1:
+      /* Bring up to version one. */
+      _chatdb_alter_table( 2, op->db, &(op->db_mutex),
+         "alter table users add column integer default 0" );
+      /* Fall through. */
+
+   default:
       break;
    }
 
@@ -245,6 +417,7 @@ int chatdb_add_user(
 
    }
 
+#if 0
    if( 0 > user_id ) {
       /* Generate an "add user" query. */
       query = sqlite3_mprintf(
@@ -275,6 +448,11 @@ int chatdb_add_user(
       retval = RETVAL_ALLOC;
       goto cleanup;
    }
+#endif
+
+   /* XXX */
+   bstring query_b = NULL;
+   _chatdb_build_insert( &query_b, &_gc_chatdb_fields_users, "users" );
 
    pthread_mutex_lock( &(op->db_mutex) );
    retval = sqlite3_exec( op->db, query, NULL, NULL, &err_msg );
@@ -453,6 +631,8 @@ int chatdb_assign_time_t( time_t* out_p, const char* in ) {
 static
 int chatdb_assign_int( int* out_p, const char* in ) {
    int retval = 0;
+
+   assert( NULL != in );
 
    *out_p = atoi( in );
 

@@ -4,6 +4,8 @@
 
 /* TODO: Timestamp. */
 
+#define CHATDB_USER_FLAG_WS      0x01
+
 #define CHATDB_OPTION_FMT_INT 0
 #define CHATDB_OPTION_FMT_STR 1
 
@@ -16,7 +18,8 @@
    f(  5, salt,             bstring, "text not null" ) \
    f(  6, iters,            int,     "integer not null" ) \
    f(  7, join_time,        time_t,  "datetime default current_timestamp" ) \
-   f(  8, session_timeout,  int,     "default 3600" )
+   f(  8, session_timeout,  int,     "integer default 3600" ) \
+   f(  9, flags,            int,     "integer default 0" )
 
 #define chatdb_free_user( u ) \
    bcgi_cleanup_bstr( (u)->user_name, likely ) \

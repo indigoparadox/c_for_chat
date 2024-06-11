@@ -179,6 +179,10 @@ int main_cb_cchat(
          LWS_WRITE_TEXT );
       break;
 
+   case LWS_CALLBACK_CLOSED:
+      main_lws_client_delete( op, wsi );
+      break;
+
    default:
       break;
    }

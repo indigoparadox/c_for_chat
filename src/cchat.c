@@ -67,7 +67,7 @@ int cchat_route_logout(
 
 static int cchat_profile_form(
    struct WEBUTIL_PAGE* page, bstring user_name, bstring email, bstring session,
-   int session_timeout
+   int session_timeout, int flags
 ) {
    int retval = 0;
 
@@ -97,8 +97,13 @@ static int cchat_profile_form(
             "<label for=\"session_timeout\">Session timeout: </label>"
             "<input type=\"text\" id=\"session_timeout\" "
                "name=\"session_timeout\" value=\"%d\" />"
-               "</div>\n",
-      bdata( user_name ), bdata( email ), session_timeout
+               "</div>\n"
+         "<div class=\"profile-field\">"
+            "<label for=\"flags_ws\">Use websockets: </label>"
+            "<input type=\"checkbox\" id=\"flags_ws\" "
+               "name=\"flags_ws\" value=\"%d\" /></div>\n",
+      bdata( user_name ), bdata( email ), session_timeout,
+      (CHATDB_USER_FLAG_WS == (CHATDB_USER_FLAG_WS & flags)) ? 1 : 0
    );
 
    if( BSTR_ERR == retval ) {
@@ -173,7 +178,8 @@ int cchat_profile_user_cb(
    dbglog_debug( 1, "profile session: %s\n", bdata( session ) );
 
    retval = cchat_profile_form(
-      page, user->user_name, user->email, session, user->session_timeout );
+      page, user->user_name, user->email, session, user->session_timeout,
+      user->flags );
 
 cleanup:
 
@@ -223,7 +229,7 @@ int cchat_route_profile(
       }
    } else {
       retval = cchat_profile_form(
-         &page, &empty_string, &empty_string, NULL, 3600 );
+         &page, &empty_string, &empty_string, NULL, 3600, 0 );
    }
 
    retval = webutil_show_page( &(op->req), q, p, &page );
@@ -259,6 +265,9 @@ int cchat_route_user(
    bstring recaptcha_decode = NULL;
    bstring session_timeout = NULL;
    bstring session_timeout_decode = NULL;
+   bstring flags_ws = NULL;
+   bstring flags_ws_decode = NULL;
+   struct tagbstring user_forbidden_chars = bsStatic( "&?* \n\r" );
 
    dbglog_debug( 1, "route: user\n" );
 
@@ -315,7 +324,9 @@ int cchat_route_user(
    cchat_decode_field( p, password2 );
    cchat_decode_field( p, email );
    cchat_decode_field( p, session_timeout );
+   cchat_decode_field( p, flags_ws );
 
+   /* Validate passwords. */
    if( 0 != bstrcmp( password1, password2 ) ) {
       dbglog_error( "password fields do not match!\n" );
       err_msg = bfromcstr( "Password fields do not match!" );
@@ -323,8 +334,20 @@ int cchat_route_user(
       goto cleanup;
    }
 
-   dbglog_debug( 1, "adding user: %s\n", bdata( user ) );
+   /* Validate user field. */
+   retval = binchr( user_decode, 0, &user_forbidden_chars );
+   if( BSTR_ERR != retval ) {
+      retval = RETVAL_PARAMS;
+      dbglog_error( "invalid username specified: %s\n", bdata( user_decode ) );
+      err_msg = bformat( "Invalid username specified!" );
+      bcgi_check_null( err_msg );
+      goto cleanup;
+   }
+   retval = 0; /* Reset retval. */
 
+   dbglog_debug( 1, "adding user: %s\n", bdata( user_decode ) );
+
+   /* TODO: Redo add user, add ORM and translate flags checkbox. */
    retval = chatdb_add_user(
       op, auth_user_id, user_decode, password1_decode, email_decode,
       session_timeout_decode, &err_msg );
@@ -344,6 +367,8 @@ cleanup:
    FCGX_FPrintF( op->req.out, "Cache-Control: no-cache\r\n" );
    FCGX_FPrintF( op->req.out, "\r\n" ); 
 
+   bcgi_cleanup_bstr( flags_ws, likely );
+   bcgi_cleanup_bstr( flags_ws_decode, likely );
    bcgi_cleanup_bstr( session_timeout, likely );
    bcgi_cleanup_bstr( session_timeout_decode, likely );
    bcgi_cleanup_bstr( recaptcha, likely );
