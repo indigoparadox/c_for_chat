@@ -271,6 +271,8 @@ int cchat_route_user(
    struct tagbstring user_forbidden_chars = bsStatic( "&?* \n\r" );
    struct CHATDB_USER user_obj;
 
+   memset( &user_obj, '\0', sizeof( struct CHATDB_USER ) );
+
    dbglog_debug( 1, "route: user\n" );
 
    if( NULL == p ) {
@@ -331,13 +333,13 @@ int cchat_route_user(
    }
 
    /* There is POST data, so try to decode it. */
-   cchat_decode_field_rename( p, user, user_obj.user_name, "user" );
+   cchat_decode_field_rename( p, user, user_obj.user_name, user );
    cchat_decode_field( p, password1 );
    cchat_decode_field( p, password2 );
-   cchat_decode_field_rename( p, email, user_obj.email, "email" );
+   cchat_decode_field_rename( p, email, user_obj.email, email );
    cchat_decode_field( p, session_timeout );
    user_obj.session_timeout = atol( (char*)session_timeout_decode->data );
-   cchat_decode_field( p, flags_ws );
+   /* cchat_decode_field( p, flags_ws ); */
    /* TODO: Decode flags. */
 
    /* Validate passwords. */

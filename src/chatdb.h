@@ -9,17 +9,19 @@
 #define CHATDB_OPTION_FMT_INT 0
 #define CHATDB_OPTION_FMT_STR 1
 
+/* Second field is prepared statement index. */
+/* If the second field < 0, this field won't be added to inserts/updates. */
 #define CHATDB_USER_TABLE( f ) \
-   f(  0, 0, user_id,          int,     "integer primary key" ) \
-   f(  1, 1, user_name,        bstring, "text not null unique" ) \
-   f(  2, 1, email,            bstring, "text" ) \
-   f(  3, 1, hash,             bstring, "text not null" ) \
-   f(  4, 1, hash_sz,          int,     "integer not null" ) \
-   f(  5, 1, salt,             bstring, "text not null" ) \
-   f(  6, 1, iters,            int,     "integer not null" ) \
-   f(  7, 0, join_time,        time_t,  "datetime default current_timestamp" ) \
-   f(  8, 0, session_timeout,  int,     "integer default 3600" ) \
-   f(  9, 1, flags,            int,     "integer default 0" )
+   f(  0, -1, user_id,         int,     "integer primary key" ) \
+   f(  1,  1, user_name,       bstring, "text not null unique" ) \
+   f(  2,  2, email,           bstring, "text" ) \
+   f(  3,  3, hash,            bstring, "text not null" ) \
+   f(  4,  4, hash_sz,         int,     "integer not null" ) \
+   f(  5,  5, salt,            bstring, "text not null" ) \
+   f(  6,  6, iters,           int,     "integer not null" ) \
+   f(  7, -1, join_time,       time_t,  "datetime default current_timestamp" ) \
+   f(  8, -1, session_timeout, int,     "integer default 3600" ) \
+   f(  9,  7, flags,           int,     "integer default 0" )
 
 #define chatdb_free_user( u ) \
    bcgi_cleanup_bstr( (u)->user_name, likely ) \

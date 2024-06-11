@@ -8,6 +8,8 @@
 #define CHATDB_SALT_SZ 32
 #define CHATDB_PASSWORD_ITER 2000
 
+#define CHATDB_INSERT_FLAG_SKIP_UNIQUE 0x01
+
 #define chatdb_argv( field_name, idx ) \
    field_name = bfromcstr( argv[idx] ); \
    if( NULL == field_name ) { \
@@ -154,7 +156,8 @@ cleanup:
 }
 
 static int _chatdb_build_insert(
-   bstring* query_p, const_bstring fields, const char* table_name
+   bstring* query_p, const_bstring fields, const char* table_name,
+   uint8_t flags
 ) {
    int retval = 0;
    struct bstrList* field_list = NULL;
@@ -162,18 +165,15 @@ static int _chatdb_build_insert(
    bstring key_str = NULL;
    int sep_pos = 0;
    size_t i = 0;
-   const struct tagbstring cs_integer = bsStatic( "integer" );
-   const struct tagbstring cs_text = bsStatic( "text" );
-   const struct tagbstring cs_datetime = bsStatic( "datetime" );
    const struct tagbstring cs_primary = bsStatic( "primary key" );
-   const struct tagbstring cs_no_insert = bsStatic( "*0$" );
+   const struct tagbstring cs_unique = bsStatic( "unique" );
+   const struct tagbstring cs_no_insert = bsStatic( "*-1$" );
    struct bstrList* fmt_list = NULL;
    struct bstrList* update_list = NULL;
    bstring fmt_str = NULL;
    bstring primary_key = NULL;
    bstring update_str = NULL;
-
-   assert( NULL == *query_p );
+   bstring unique_field = NULL;
 
    retval = _chatdb_build_split_fields( &field_list, fields );
    if( retval ) {
@@ -214,49 +214,58 @@ static int _chatdb_build_insert(
          primary_key = bmidstr( field_list->entry[i], 0, sep_pos );
          bcgi_check_null( primary_key );
          continue;
+
+      } else if(
+         BSTR_ERR != binstrcaseless(
+            field_list->entry[i], sep_pos, &cs_unique )
+      ) {
+         /* TODO: Handle multiple unique fields. */
+         dbglog_debug( 1, "noting unique field: %s\n",
+            bdata( field_list->entry[i] ) );
+         assert( NULL == unique_field );
+         unique_field = bmidstr( field_list->entry[i], 0, sep_pos );
+         bcgi_check_null( unique_field );
+         retval = binsertStatic( unique_field, 0, ", ", '\0' );
+         bcgi_check_bstr_err( unique_field );
+
+         if(
+            CHATDB_INSERT_FLAG_SKIP_UNIQUE ==
+            (CHATDB_INSERT_FLAG_SKIP_UNIQUE & flags)
+         ) {
+            dbglog_debug( 1, "skipping unique field in query...\n" );
+            continue;
+         }
+
+         /* Also add placeholder since we're not skipping it. */
+         fmt_list->entry[fmt_list->qty++] = bfromcstr( "?" );
+
       } else if(
          BSTR_ERR != binstr( field_list->entry[i], sep_pos, &cs_no_insert )
       ) {
          dbglog_debug( 1, "skipping no-insert field: %s\n",
             bdata( field_list->entry[i] ) );
          continue;
-      } else if(
-         BSTR_ERR != binstrcaseless(
-            field_list->entry[i], sep_pos, &cs_datetime )
-      ) {
-         dbglog_debug( 1, "skipping datetime field: %s\n",
-            bdata( field_list->entry[i] ) );
-         continue;
-      } else if(
-         BSTR_ERR != binstrcaseless(
-            field_list->entry[i], sep_pos, &cs_text )
-      ) {
-         fmt_list->entry[fmt_list->qty++] = bfromcstr( "'%q'" );
-      } else if(
-         BSTR_ERR != binstrcaseless(
-            field_list->entry[i], sep_pos, &cs_integer )
-      ) {
-         fmt_list->entry[fmt_list->qty++] = bfromcstr( "%d" );
       } else {
-         dbglog_error( "invalid db type: %s\n", bdata( field_list->entry[i] ) );
-         continue;
+         fmt_list->entry[fmt_list->qty++] = bfromcstr( "?" );
       }
+
+      /* Truncate properties after star separators. */
+      key_list->entry[key_list->qty] = bmidstr(
+         field_list->entry[i], 0, sep_pos );
+      bcgi_check_null( key_list->entry[key_list->qty] );
 
       /* Build contingency update statement. */
       update_list->entry[update_list->qty] = bmidstr(
          field_list->entry[i], 0, sep_pos );
       bcgi_check_null( update_list->entry[update_list->qty] );
-      retval = bcatcstr( update_list->entry[update_list->qty], "=" );
+      retval = bcatcstr( update_list->entry[update_list->qty], "=excluded." );
       bcgi_check_bstr_err( update_list->entry[update_list->qty] );
       retval = bconcat( update_list->entry[update_list->qty],
-         fmt_list->entry[fmt_list->qty - 1] );
+         key_list->entry[key_list->qty] );
       bcgi_check_bstr_err( update_list->entry[update_list->qty] );
       update_list->qty++;
 
-      /* Truncate properties after star separators. */
-      key_list->entry[key_list->qty++] = bmidstr(
-         field_list->entry[i], 0, sep_pos );
-      bcgi_check_null( key_list->entry[key_list->qty - 1] );
+      key_list->qty++;
    }
 
    bcgi_check_null( primary_key );
@@ -266,10 +275,15 @@ static int _chatdb_build_insert(
    update_str = bjoinStatic( update_list, ", " );
 
    /* Build the query string. */
-   *query_p = bformat( "insert into users (%s) values (%s) "
-      "on conflict set %s where excluded.%s = %s;",
-      bdata( key_str ), bdata( fmt_str ),
+   if( NULL == *query_p ) {
+      *query_p = bfromcstr( "" );
+      bcgi_check_null( *query_p );
+   }
+   retval = bassignformat( *query_p, "insert into users ( %s ) values ( %s ) "
+      "on conflict( %s ) do update set %s where %s=excluded.%s;",
+      bdata( key_str ), bdata( fmt_str ), bdata( primary_key ),
       bdata( update_str ), bdata( primary_key ), bdata( primary_key ) );
+   bcgi_check_bstr_err( *query_p );
 
 cleanup:
 
@@ -277,6 +291,7 @@ cleanup:
    bcgi_cleanup_bstr( key_str, likely );
    bcgi_cleanup_bstr( update_str, likely );
    bcgi_cleanup_bstr( primary_key, likely );
+   bcgi_cleanup_bstr( unique_field, likely );
 
    if( NULL != key_list ) {
       bstrListDestroy( update_list );
@@ -313,13 +328,13 @@ int chatdb_init( bstring path, struct CCHAT_OP_DATA* op ) {
    assert( NULL != op->db );
 
    /* XXX */
-   bstring query_b = NULL;
    /*
+   bstring query_b = NULL;
    _chatdb_build_create_table( &query_b, &_gc_chatdb_fields_users, "users" );
-   */
    _chatdb_build_insert( &query_b, &_gc_chatdb_fields_users, "users" );
    dbglog_debug( 1, "insert query: %s\n", bdata( query_b ) );
    exit( 1 );
+   */
 
    /* Create message table if it doesn't exist. */
    pthread_mutex_lock( &(op->db_mutex) );
@@ -411,7 +426,7 @@ int chatdb_init( bstring path, struct CCHAT_OP_DATA* op ) {
    case 1:
       /* Bring up to version one. */
       _chatdb_alter_table( 2, op->db, &(op->db_mutex),
-         "alter table users add column integer default 0" );
+         "alter table users add column flags integer default 0" );
       /* Fall through. */
 
    default:
@@ -435,16 +450,53 @@ void chatdb_close( struct CCHAT_OP_DATA* op ) {
 
 }
 
+static int _chatdb_bind_int( sqlite3_stmt* stmt, int* i_p, int value ) {
+   int retval = 0;
+
+   assert( NULL != stmt );
+   retval = sqlite3_bind_int( stmt, (*i_p)++, value );
+   if( SQLITE_OK != retval ) {
+      dbglog_error( "error: %d\n", retval );
+      retval = RETVAL_DB;
+   }
+   
+   return retval;
+}
+
+static int _chatdb_bind_time_t( sqlite3_stmt* stmt, int* i_p, time_t value ) {
+   int retval = 0;
+   /* TODO */
+   retval = RETVAL_DB;
+   return retval;
+}
+
+static int _chatdb_bind_bstring( sqlite3_stmt* stmt, int* i_p, bstring value ) {
+   int retval = 0;
+
+   assert( NULL != stmt );
+   retval = sqlite3_bind_text(
+      stmt, (*i_p)++, bdata( value ), blength( value ), SQLITE_STATIC );
+   if( SQLITE_OK != retval ) {
+      dbglog_error( "error: %d\n", retval );
+      retval = RETVAL_DB;
+   }
+
+   return retval;
+}
+
 int chatdb_add_user(
    struct CCHAT_OP_DATA* op, struct CHATDB_USER* user, bstring password,
    bstring* err_msg_p
 ) {
    int retval = 0;
-   char* query = NULL;
+   bstring query_b = NULL;
    char* err_msg = NULL;
    unsigned char* salt_str = NULL;
    bstring hash = NULL;
    bstring salt = NULL;
+   sqlite3_stmt* stmt;
+   int i = 0;
+   int flags = 0;
 
    if( 0 == blength( user->user_name ) ) {
       *err_msg_p = bfromcstr( "Username cannot be empty!" );
@@ -472,55 +524,83 @@ int chatdb_add_user(
 
    }
 
-#if 0
-   if( 0 > user_id ) {
-      /* Generate an "add user" query. */
-      query = sqlite3_mprintf(
-         "insert into users "
-         "(user_name, email, hash, hash_sz, salt, iters, session_timeout) "
-         "values('%q', '%q', '%q', '%d', '%q', '%d', '%q')",
-         bdata( user ), bdata( email ), bdata( hash ), CHATDB_HASH_SZ,
-         bdata( salt ), CHATDB_PASSWORD_ITER, bdata( session_timeout ) );
+run_statement:
 
-      dbglog_debug( 1, "attempting to add user %s...\n", bdata( user ) );
-   } else {
-      /* Generate an "edit user" query. */
-      /* TODO: Add password if provided. */
-      query = sqlite3_mprintf(
-         "update users set "
-            "user_name = '%q', "
-            "email = '%q', "
-            "session_timeout = '%q' "
-            "where user_id = '%d'",
-         bdata( user ), bdata( email ), bdata( session_timeout ), user_id );
+   _chatdb_build_insert( &query_b, &_gc_chatdb_fields_users, "users", flags );
 
-      dbglog_debug( 1, "updating user %d...\n", user_id );
-   }
-
-   /* Check query. */
-   if( NULL == query ) {
-      dbglog_error( "could not allocate database user insert!\n" );
-      retval = RETVAL_ALLOC;
-      goto cleanup;
-   }
-#endif
-
-   /* XXX */
-   bstring query_b = NULL;
-   _chatdb_build_insert( &query_b, &_gc_chatdb_fields_users, "users" );
+   dbglog_debug( 1, "stmt: %s\n", bdata( query_b ) );
 
    pthread_mutex_lock( &(op->db_mutex) );
-   retval = sqlite3_exec( op->db, query, NULL, NULL, &err_msg );
-   pthread_mutex_unlock( &(op->db_mutex) );
+
+   /* Prepare the statement. */
+   retval = sqlite3_prepare_v2(
+      op->db, bdata( query_b ), blength( query_b ), &stmt, NULL );
    if( SQLITE_OK != retval ) {
+      dbglog_error( "error during preparation: %s\n",
+         sqlite3_errmsg( op->db ) );
+      pthread_mutex_unlock( &(op->db_mutex) );
       retval = RETVAL_DB;
-      if( NULL != err_msg_p ) {
-         *err_msg_p = bfromcstr( err_msg );
-      }
       goto cleanup;
    }
 
+   i = 1;
+
+   /* Bind the fields. */
+   #define CHATDB_USER_TABLE_PREPARE( idx, u, field, c_type, db_type ) \
+      /* TODO: Skip unique fields! */ \
+      if( \
+         0 < u && ( \
+            (CHATDB_INSERT_FLAG_SKIP_UNIQUE != \
+               (CHATDB_INSERT_FLAG_SKIP_UNIQUE & flags) \
+         ) || (NULL == strstr( db_type, "unique" )) \
+      ) ) { \
+         dbglog_debug( 1, "binding user->" #field " as param %d...\n", i ); \
+         retval = _chatdb_bind_ ## c_type ( stmt, &i, user->field ); \
+         if( retval ) { \
+            dbglog_error( "error binding field: " #field "!\n" ); \
+            assert( NULL == *err_msg_p ); \
+            *err_msg_p = bfromcstr( "Error binding field: " #field "\n" ); \
+            pthread_mutex_unlock( &(op->db_mutex) ); \
+            goto cleanup; \
+         } \
+      }
+
+   CHATDB_USER_TABLE( CHATDB_USER_TABLE_PREPARE );
+
+   /* Execute the statement. */
+   retval = sqlite3_step( stmt );
+   if( SQLITE_CONSTRAINT == retval && 0 == flags ) {
+      /* This is somewhat awkward, but we can't specify two "on conflict"
+       * criteria in the insert statement. So we 'll just use the user_id,
+       * and if the username hasn't changed, causing a conflict the upsert
+       * can't handle, then we'll just run the upsert again with no username!
+       */
+      dbglog_debug( 1,
+         "username didn't change; trying again with no username...\n" );
+      bdestroy( user->user_name );
+      user->user_name = NULL;
+      pthread_mutex_unlock( &(op->db_mutex) );
+      sqlite3_finalize( stmt );
+      flags |= CHATDB_INSERT_FLAG_SKIP_UNIQUE;
+      goto run_statement;
+
+   } else if( SQLITE_DONE != retval ) {
+      dbglog_error( "error %d during step: %s\n",
+         retval, sqlite3_errmsg( op->db ) );
+      pthread_mutex_unlock( &(op->db_mutex) );
+      sqlite3_finalize( stmt );
+      retval = RETVAL_DB;
+      goto cleanup;
+   }
+   retval = 0;
+
+   /* Clean up. */
+   sqlite3_finalize( stmt );
+   pthread_mutex_unlock( &(op->db_mutex) );
+
 cleanup:
+
+   bcgi_cleanup_bstr( query_b, likely );
 
    if( NULL != hash ) {
       bdestroy( hash );
@@ -532,10 +612,6 @@ cleanup:
 
    if( NULL != salt_str ) {
       free( salt_str );
-   }
-
-   if( NULL != query ) {
-      sqlite3_free( query );
    }
 
    if( NULL != err_msg ) {
@@ -981,6 +1057,7 @@ int chatdb_iter_sessions(
    }
 
    pthread_mutex_lock( &(op->db_mutex) );
+   dbglog_debug( 1, "locked\n" );
    retval = sqlite3_exec(
       op->db, query, chatdb_dbcb_sessions, &arg_struct, &err_msg );
    pthread_mutex_unlock( &(op->db_mutex) );
