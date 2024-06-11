@@ -523,11 +523,13 @@ int chatdb_dbcb_users( void* arg, int argc, char** argv, char **col ) {
    bcgi_check_null( arg_struct->user->salt );
 #endif
 
-   retval = arg_struct->cb_user(
-      arg_struct->page,
-      arg_struct->op,
-      arg_struct->password_test,
-      arg_struct->user );
+   if( NULL != arg_struct->cb_user ) {
+      retval = arg_struct->cb_user(
+         arg_struct->page,
+         arg_struct->op,
+         arg_struct->password_test,
+         arg_struct->user );
+   }
 
 cleanup:
 

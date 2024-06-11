@@ -7,33 +7,19 @@ typedef int (*rtproto_cmd_cb_t)(
 #define RTPROTO_CMD_TABLE( f ) \
    f( "PRIVMSG", rtproto_cmd_privmsg )
 
-int rtproto_lookup_user_cb(
-   struct WEBUTIL_PAGE* page, struct CCHAT_OP_DATA* op,
-   bstring password_test, int* user_id_out_p, int* session_timeout_p,
-   int user_id, bstring user_name, bstring email,
-   bstring hash, size_t hash_sz, bstring salt, size_t iters, time_t msg_time,
-   int session_timeout
-) {
-   int retval = 0;
-
-   *user_id_out_p = user_id;
-
-   return retval;
-}
-
 static int rtproto_cmd_privmsg(
    struct CCHAT_OP_DATA* op, int user_id, bstring line
 ) {
    int retval = 0;
    bstring msg = NULL;
    int msg_pos = 0;
+   struct CHATDB_USER user;
 
-#if 0
+   memset( &user, '\0', sizeof( struct CHATDB_USER ) );
+
    /* Figure out the sending user. */
-   retval = chatdb_iter_users(
-      NULL, op, NULL, user_id, NULL, NULL,
-      NULL, rtproto_lookup_user_cb, NULL );
-#endif
+   user.user_id = user_id;
+   retval = chatdb_iter_users( NULL, op, NULL, &user, NULL, NULL );
 
    /* Cut off the command prefix. */
    msg_pos = bstrchr( line, ':' );
@@ -47,7 +33,11 @@ static int rtproto_cmd_privmsg(
    retval = btrimws( msg );
    bcgi_check_bstr_err( retval );
 
-   retval = binsertStatic( msg, 0, "XXX_USER", '\0' );
+   retval = binsertStatic( msg, 0, " PRIVMSG: ", '\0' );
+   bcgi_check_bstr_err( msg );
+   retval = binsert( msg, 0, user.user_name, '\0' );
+   bcgi_check_bstr_err( msg );
+   retval = binsertStatic( msg, 0, ":", '\0' );
    bcgi_check_bstr_err( msg );
 
    rtproto_client_write_all( op, msg );
@@ -55,6 +45,8 @@ static int rtproto_cmd_privmsg(
 cleanup:
 
    bcgi_cleanup_bstr( msg, likely );
+
+   chatdb_free_user( &user );
 
    return retval;
 }
