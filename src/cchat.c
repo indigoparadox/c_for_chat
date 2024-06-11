@@ -23,7 +23,7 @@ extern bstring g_recaptcha_secret_key;
    f( "/", cchat_route_root, "GET" ) \
    f( "", NULL, "" )
 
-#define cchat_decode_field_rename( list, field_name, post_name ) \
+#define cchat_decode_field_rename( list, field_name, decode_name, post_name ) \
    retval = bcgi_query_key( list, #post_name, &field_name ); \
    if( retval || NULL == field_name ) { \
       err_msg = bfromcstr( "Invalid " #post_name "!" ); \
@@ -31,13 +31,14 @@ extern bstring g_recaptcha_secret_key;
       retval = RETVAL_PARAMS; \
       goto cleanup; \
    } \
-   retval = bcgi_urldecode( field_name, &field_name ## _decode ); \
+   retval = bcgi_urldecode( field_name, &(decode_name) ); \
    if( retval ) { \
       goto cleanup; \
    }
 
 #define cchat_decode_field( list, field_name ) \
-   cchat_decode_field_rename( list, field_name, field_name );
+   cchat_decode_field_rename( \
+      list, field_name, field_name ## _decode, field_name );
 
 int cchat_route_logout(
    struct CCHAT_OP_DATA* op, int auth_user_id,
@@ -268,6 +269,7 @@ int cchat_route_user(
    bstring flags_ws = NULL;
    bstring flags_ws_decode = NULL;
    struct tagbstring user_forbidden_chars = bsStatic( "&?* \n\r" );
+   struct CHATDB_USER user_obj;
 
    dbglog_debug( 1, "route: user\n" );
 
@@ -318,13 +320,25 @@ int cchat_route_user(
       }
    }
 
+   if( 0 <= auth_user_id ) {
+      /* We're editing an existing user, so grab that user. */
+      user_obj.user_id = auth_user_id;
+      retval = chatdb_iter_users( NULL, op, NULL, &user_obj, NULL, NULL );
+      if( retval ) {
+         dbglog_error( "error fetching user!\n" );
+         goto cleanup;
+      }
+   }
+
    /* There is POST data, so try to decode it. */
-   cchat_decode_field( p, user );
+   cchat_decode_field_rename( p, user, user_obj.user_name, "user" );
    cchat_decode_field( p, password1 );
    cchat_decode_field( p, password2 );
-   cchat_decode_field( p, email );
+   cchat_decode_field_rename( p, email, user_obj.email, "email" );
    cchat_decode_field( p, session_timeout );
+   user_obj.session_timeout = atol( (char*)session_timeout_decode->data );
    cchat_decode_field( p, flags_ws );
+   /* TODO: Decode flags. */
 
    /* Validate passwords. */
    if( 0 != bstrcmp( password1, password2 ) ) {
@@ -348,9 +362,7 @@ int cchat_route_user(
    dbglog_debug( 1, "adding user: %s\n", bdata( user_decode ) );
 
    /* TODO: Redo add user, add ORM and translate flags checkbox. */
-   retval = chatdb_add_user(
-      op, auth_user_id, user_decode, password1_decode, email_decode,
-      session_timeout_decode, &err_msg );
+   retval = chatdb_add_user( op, &user_obj, password1_decode, &err_msg );
 
 cleanup:
 
@@ -366,6 +378,8 @@ cleanup:
    }
    FCGX_FPrintF( op->req.out, "Cache-Control: no-cache\r\n" );
    FCGX_FPrintF( op->req.out, "\r\n" ); 
+
+   chatdb_free_user( &(user_obj) );
 
    bcgi_cleanup_bstr( flags_ws, likely );
    bcgi_cleanup_bstr( flags_ws_decode, likely );

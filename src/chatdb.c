@@ -16,8 +16,8 @@
       goto cleanup; \
    }
 
-#define CHATDB_USER_TABLE_DB_FIELDS( idx, field, c_type, db_type ) \
-   #field "*" db_type "|"
+#define CHATDB_USER_TABLE_DB_FIELDS( idx, u, field, c_type, db_type ) \
+   #field "*" #u "$" db_type "|"
 
 #define _chatdb_alter_table( version, db, mutex, alter_stmt ) \
       pthread_mutex_lock( mutex ); \
@@ -77,26 +77,60 @@ static int _chatdb_build_create_table(
    bstring* query_p, const_bstring fields, const char* table_name
 ) {
    int retval = 0;
-   struct bstrList* query_list = NULL;
    bstring list_str = NULL;
    size_t i = 0;
+   struct bstrList* field_list = NULL;
+   struct bstrList* key_list = NULL;
+   bstring props = NULL;
+   int sep_1_pos = 0;
+   int sep_2_pos = 0;
 
    assert( NULL == *query_p );
 
-   retval = _chatdb_build_split_fields( &query_list, fields );
+   retval = _chatdb_build_split_fields( &field_list, fields );
    if( retval ) {
       goto cleanup;
    }
+
+   /* Create a list to hold truncated keys to used fields. */
+   key_list = bstrListCreate();
+   bcgi_check_null( key_list );
+   retval = bstrListAlloc( key_list, field_list->qty );
+   bcgi_check_bstr_err( key_list );
+
+   props = bfromcstr( "" );
+   bcgi_check_null( props );
    
    /* Replace star separators with spaces. */
-   for( i = 0 ; query_list->qty > i ; i++ ) {
-      assert( NULL != query_list->entry[i]->data );
-      assert( BSTR_ERR != bstrchr( query_list->entry[i], '*' ) );
-      query_list->entry[i]->data[bstrchr( query_list->entry[i], '*' )] = ' ';
+   for( i = 0 ; field_list->qty > i ; i++ ) {
+      assert( NULL != field_list->entry[i]->data );
+
+      sep_1_pos = bstrchr( field_list->entry[i], '*' );
+      sep_2_pos = bstrchr( field_list->entry[i], '$' ) + 1;
+
+      assert( BSTR_ERR != sep_1_pos );
+      assert( BSTR_ERR != sep_2_pos );
+
+      /* Get the field name. */
+      key_list->entry[i] = bmidstr( field_list->entry[i], 0, sep_1_pos );
+      bcgi_check_null( key_list->entry[i] );
+      retval = bconchar( key_list->entry[i], ' ' );
+      bcgi_check_bstr_err( key_list->entry[i] );
+
+      /* Get the field properties. */
+      retval = bassignmidstr(
+         props, field_list->entry[i],
+         sep_2_pos, blength( field_list->entry[i] ) - sep_2_pos );
+      bcgi_check_bstr_err( props );
+
+      retval = bconcat( key_list->entry[i], props );
+      bcgi_check_bstr_err( key_list->entry[i] );
+
+      key_list->qty++;
    }
 
    /* Join split field names into list. */
-   list_str = bjoinStatic( query_list, ", " );
+   list_str = bjoinStatic( key_list, ", " );
    bcgi_check_null( list_str );
 
    *query_p = bformat( "create table if not exists %s( %s );",
@@ -106,8 +140,15 @@ static int _chatdb_build_create_table(
 cleanup:
 
    bcgi_cleanup_bstr( list_str, likely );
+   bcgi_cleanup_bstr( props, likely );
 
-   bstrListDestroy( query_list );
+   if( NULL != field_list ) {
+      bstrListDestroy( field_list );
+   }
+
+   if( NULL != key_list ) {
+      bstrListDestroy( key_list );
+   }
 
    return retval;
 }
@@ -125,6 +166,7 @@ static int _chatdb_build_insert(
    const struct tagbstring cs_text = bsStatic( "text" );
    const struct tagbstring cs_datetime = bsStatic( "datetime" );
    const struct tagbstring cs_primary = bsStatic( "primary key" );
+   const struct tagbstring cs_no_insert = bsStatic( "*0$" );
    struct bstrList* fmt_list = NULL;
    struct bstrList* update_list = NULL;
    bstring fmt_str = NULL;
@@ -171,6 +213,12 @@ static int _chatdb_build_insert(
             bdata( field_list->entry[i] ) );
          primary_key = bmidstr( field_list->entry[i], 0, sep_pos );
          bcgi_check_null( primary_key );
+         continue;
+      } else if(
+         BSTR_ERR != binstr( field_list->entry[i], sep_pos, &cs_no_insert )
+      ) {
+         dbglog_debug( 1, "skipping no-insert field: %s\n",
+            bdata( field_list->entry[i] ) );
          continue;
       } else if(
          BSTR_ERR != binstrcaseless(
@@ -223,8 +271,6 @@ static int _chatdb_build_insert(
       bdata( key_str ), bdata( fmt_str ),
       bdata( update_str ), bdata( primary_key ), bdata( primary_key ) );
 
-   dbglog_debug( 1, "insert query: %s\n", bdata( *query_p ) );
-
 cleanup:
 
    bcgi_cleanup_bstr( fmt_str, likely );
@@ -265,6 +311,15 @@ int chatdb_init( bstring path, struct CCHAT_OP_DATA* op ) {
    }
 
    assert( NULL != op->db );
+
+   /* XXX */
+   bstring query_b = NULL;
+   /*
+   _chatdb_build_create_table( &query_b, &_gc_chatdb_fields_users, "users" );
+   */
+   _chatdb_build_insert( &query_b, &_gc_chatdb_fields_users, "users" );
+   dbglog_debug( 1, "insert query: %s\n", bdata( query_b ) );
+   exit( 1 );
 
    /* Create message table if it doesn't exist. */
    pthread_mutex_lock( &(op->db_mutex) );
@@ -381,8 +436,8 @@ void chatdb_close( struct CCHAT_OP_DATA* op ) {
 }
 
 int chatdb_add_user(
-   struct CCHAT_OP_DATA* op, int user_id, bstring user, bstring password, bstring email,
-   bstring session_timeout, bstring* err_msg_p
+   struct CCHAT_OP_DATA* op, struct CHATDB_USER* user, bstring password,
+   bstring* err_msg_p
 ) {
    int retval = 0;
    char* query = NULL;
@@ -391,19 +446,19 @@ int chatdb_add_user(
    bstring hash = NULL;
    bstring salt = NULL;
 
-   if( 0 == blength( user ) ) {
+   if( 0 == blength( user->user_name ) ) {
       *err_msg_p = bfromcstr( "Username cannot be empty!" );
       retval = RETVAL_PARAMS;
       goto cleanup;
    }
 
-   if( 0 > user_id && 0 == blength( password ) ) {
+   if( 0 > user->user_id && 0 == blength( password ) ) {
       *err_msg_p = bfromcstr( "New password cannot be empty!" );
       retval = RETVAL_PARAMS;
       goto cleanup;
    }
 
-   if( 0 > user_id || 0 < blength( password ) ) {
+   if( 0 > user->user_id || 0 < blength( password ) ) {
    
       /* Generate a new salt. */
       retval = bcgi_generate_salt( &salt, CHATDB_SALT_SZ );
@@ -667,7 +722,7 @@ int chatdb_dbcb_users( void* arg, int argc, char** argv, char **col ) {
       goto cleanup;
    }
 
-   #define CHATDB_USER_TABLE_ASSIGN( idx, field, c_type, db_type ) \
+   #define CHATDB_USER_TABLE_ASSIGN( idx, u, field, c_type, db_type ) \
       chatdb_assign_ ## c_type ( &(arg_struct->user->field), argv[idx] );
 
    CHATDB_USER_TABLE( CHATDB_USER_TABLE_ASSIGN );
@@ -750,7 +805,7 @@ int chatdb_iter_users(
    arg_struct.password_test = password_test;
    arg_struct.op = op;
 
-   #define CHATDB_USER_TABLE_SELECT( idx, field, c_type, db_type ) \
+   #define CHATDB_USER_TABLE_SELECT( idx, u, field, c_type, db_type ) \
       #field,
 
    if( NULL != user->user_name ) {

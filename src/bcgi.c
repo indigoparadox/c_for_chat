@@ -47,11 +47,10 @@ int bcgi_urldecode( bstring in, bstring* out_p ) {
    
    if( NULL == *out_p ) {
       *out_p = bfromcstr( "" );
-      if( NULL == *out_p ) {
-         dbglog_error( "could not allocate urldecode output buffer!\n" );
-         retval = RETVAL_ALLOC;
-         goto cleanup;
-      }
+      bcgi_check_null( *out_p );
+   } else {
+      retval = btrunc( *out_p, 0 );
+      bcgi_check_bstr_err( *out_p );
    }
 
    while( i_in < blength( in ) ) {

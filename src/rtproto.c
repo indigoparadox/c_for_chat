@@ -20,6 +20,10 @@ static int rtproto_cmd_privmsg(
    /* Figure out the sending user. */
    user.user_id = user_id;
    retval = chatdb_iter_users( NULL, op, NULL, &user, NULL, NULL );
+   if( retval ) {
+      dbglog_error( "error fetching user!\n" );
+      goto cleanup;
+   }
 
    /* Cut off the command prefix. */
    msg_pos = bstrchr( line, ':' );

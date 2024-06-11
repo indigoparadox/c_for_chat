@@ -10,16 +10,16 @@
 #define CHATDB_OPTION_FMT_STR 1
 
 #define CHATDB_USER_TABLE( f ) \
-   f(  0, user_id,          int,     "integer primary key" ) \
-   f(  1, user_name,        bstring, "text not null unique" ) \
-   f(  2, email,            bstring, "text" ) \
-   f(  3, hash,             bstring, "text not null" ) \
-   f(  4, hash_sz,          int,     "integer not null" ) \
-   f(  5, salt,             bstring, "text not null" ) \
-   f(  6, iters,            int,     "integer not null" ) \
-   f(  7, join_time,        time_t,  "datetime default current_timestamp" ) \
-   f(  8, session_timeout,  int,     "integer default 3600" ) \
-   f(  9, flags,            int,     "integer default 0" )
+   f(  0, 0, user_id,          int,     "integer primary key" ) \
+   f(  1, 1, user_name,        bstring, "text not null unique" ) \
+   f(  2, 1, email,            bstring, "text" ) \
+   f(  3, 1, hash,             bstring, "text not null" ) \
+   f(  4, 1, hash_sz,          int,     "integer not null" ) \
+   f(  5, 1, salt,             bstring, "text not null" ) \
+   f(  6, 1, iters,            int,     "integer not null" ) \
+   f(  7, 0, join_time,        time_t,  "datetime default current_timestamp" ) \
+   f(  8, 0, session_timeout,  int,     "integer default 3600" ) \
+   f(  9, 1, flags,            int,     "integer default 0" )
 
 #define chatdb_free_user( u ) \
    bcgi_cleanup_bstr( (u)->user_name, likely ) \
@@ -27,7 +27,7 @@
    bcgi_cleanup_bstr( (u)->hash, likely ) \
    bcgi_cleanup_bstr( (u)->salt, likely )
 
-#define CHATDB_USER_TABLE_STRUCT( idx, field, c_type, db_type ) c_type field;
+#define CHATDB_USER_TABLE_STRUCT( idx, u, field, c_type, db_type ) c_type field;
 
 struct CHATDB_USER {
    CHATDB_USER_TABLE( CHATDB_USER_TABLE_STRUCT )
@@ -55,8 +55,8 @@ int chatdb_init( bstring path, struct CCHAT_OP_DATA* op );
 void chatdb_close( struct CCHAT_OP_DATA* op );
 
 int chatdb_add_user(
-   struct CCHAT_OP_DATA* op, int user_id, bstring user, bstring password, bstring email,
-   bstring session_timeout, bstring* err_msg_p );
+   struct CCHAT_OP_DATA* op, struct CHATDB_USER* user, bstring password,
+   bstring* err_msg_p );
 
 int chatdb_send_message(
    struct CCHAT_OP_DATA* op, int user_id, bstring msg, bstring* err_msg_p );
