@@ -20,6 +20,7 @@ extern bstring g_recaptcha_secret_key;
    f( "/chat", cchat_route_chat, "GET" ) \
    f( "/style.css", cchat_route_style_css, "GET" ) \
    f( "/chat.js", cchat_route_chat_js, "GET" ) \
+   f( "/alert.mp3", cchat_route_alert_mp3, "GET" ) \
    f( "/", cchat_route_root, "GET" ) \
    f( "", NULL, "" )
 
@@ -922,6 +923,18 @@ int cchat_route_chat_js(
 
    return retval;
 }
+
+int cchat_route_alert_mp3(
+   struct CCHAT_OP_DATA* op, int auth_user_id,
+   struct bstrList* q, struct bstrList* p, struct bstrList* c
+) {
+   int retval = 0;
+
+   retval = webutil_dump_file( &(op->req), "alert.mp3", "audio/mp3" );
+
+   return retval;
+}
+
 
 int cchat_route_root(
    struct CCHAT_OP_DATA* op, int auth_user_id,

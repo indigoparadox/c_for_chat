@@ -1,9 +1,11 @@
 
 var sock;
+var alerter;
 
 $(document).ready( function() {
    sock = new WebSocket(
       "ws://zarchat.interfinitydynamics.info/chat_sock", "cchat-protocol" );
+   alerter = new Audio( '/alert.mp3' );
 
    $('#send').click( function( e ) {
       /* Send the text to the server as a chat and clear the textbox. */
@@ -19,10 +21,12 @@ $(document).ready( function() {
       console.log( "receive: " + e.data );
       let m = re_msg.exec( e.data );
 
-      let d = new Date( m[3] * 1000 );
-
       /* Show privmsgs in the message list. */
       if( "PRIVMSG" == m[2] ) {
+         let d = new Date( m[3] * 1000 );
+
+         alerter.play();
+         
          $('.chat-messages').prepend( "<tr>" +
                "<td class=\"chat-from\">" + m[1] + "</td>" +
                "<td class=\"chat-msg\">" + m[4] + "</td>" +

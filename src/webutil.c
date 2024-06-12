@@ -44,10 +44,12 @@ int webutil_dump_file(
       goto cleanup;
    }
 
+   dbglog_debug( 1, "%s: %d bytes\n", filename, blength( contents ) );
+
    FCGX_FPrintF( req->out, "Content-type: %s\r\n", mimetype );
    FCGX_FPrintF( req->out, "Status: 200\r\n\r\n" );
 
-   FCGX_FPrintF( req->out, "%s", bdata( contents ) );
+   FCGX_PutStr( bdata( contents ), blength( contents ), req->out );
 
 cleanup:
 
