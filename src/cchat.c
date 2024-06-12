@@ -23,22 +23,26 @@ extern bstring g_recaptcha_secret_key;
    f( "/", cchat_route_root, "GET" ) \
    f( "", NULL, "" )
 
-#define cchat_decode_field_rename( list, field_name, decode_name, post_name ) \
-   retval = bcgi_query_key( list, #post_name, &field_name ); \
-   if( retval || NULL == field_name ) { \
+#define cchat_decode_field_rename( def, list, f_name, decode_name, post_name ) \
+   retval = bcgi_query_key( list, #post_name, &f_name ); \
+   if( retval || (NULL == def && NULL == f_name) ) { \
       err_msg = bfromcstr( "Invalid " #post_name "!" ); \
       dbglog_error( "no " #post_name " found!\n" ); \
       retval = RETVAL_PARAMS; \
       goto cleanup; \
-   } \
-   retval = bcgi_urldecode( field_name, &(decode_name) ); \
-   if( retval ) { \
-      goto cleanup; \
+   } else if( !retval && NULL != f_name ) { \
+      retval = bcgi_urldecode( f_name, &(decode_name) ); \
+      if( retval ) { \
+         goto cleanup; \
+      } \
+   } else { \
+      assert( NULL == decode_name ); \
+      decode_name = bfromcstr( def ); \
    }
 
-#define cchat_decode_field( list, field_name ) \
+#define cchat_decode_field( def, list, field_name ) \
    cchat_decode_field_rename( \
-      list, field_name, field_name ## _decode, field_name );
+      def, list, field_name, field_name ## _decode, field_name );
 
 int cchat_route_logout(
    struct CCHAT_OP_DATA* op, int auth_user_id,
@@ -100,9 +104,10 @@ static int cchat_profile_form(
          "<div class=\"profile-field\">"
             "<label for=\"flags_ws\">Use websockets: </label>"
             "<input type=\"checkbox\" id=\"flags_ws\" "
-               "name=\"flags_ws\" value=\"%d\" /></div>\n",
+               "name=\"flags_ws\"%s /></div>\n",
       bdata( user_name ), bdata( email ), session_timeout,
-      (CHATDB_USER_FLAG_WS == (CHATDB_USER_FLAG_WS & flags)) ? 1 : 0
+      (CHATDB_USER_FLAG_WS == (CHATDB_USER_FLAG_WS & flags)) ?
+         " checked=\"checked\"" : ""
    );
 
    if( BSTR_ERR == retval ) {
@@ -249,13 +254,11 @@ int cchat_route_user(
 ) {
    int retval = 0;
    bstring user = NULL;
-   bstring user_decode = NULL;
    bstring password1 = NULL;
    bstring password1_decode = NULL;
    bstring password2 = NULL;
    bstring password2_decode = NULL;
    bstring email = NULL;
-   bstring email_decode = NULL;
    bstring err_msg = NULL;
    bstring session = NULL;
    bstring csrf = NULL;
@@ -290,7 +293,7 @@ int cchat_route_user(
          goto cleanup;
       }
 
-      cchat_decode_field( p, csrf );
+      cchat_decode_field( NULL, p, csrf );
 
       /* Validate CSRF token. */
       if( 0 != bstrcmp( csrf_decode, session ) ) {
@@ -331,14 +334,20 @@ int cchat_route_user(
    }
 
    /* There is POST data, so try to decode it. */
-   cchat_decode_field_rename( p, user, user_obj.user_name, user );
-   cchat_decode_field( p, password1 );
-   cchat_decode_field( p, password2 );
-   cchat_decode_field_rename( p, email, user_obj.email, email );
-   cchat_decode_field( p, session_timeout );
+   cchat_decode_field_rename( NULL, p, user, user_obj.user_name, user );
+   cchat_decode_field( NULL, p, password1 );
+   cchat_decode_field( NULL, p, password2 );
+   cchat_decode_field_rename( NULL, p, email, user_obj.email, email );
+   cchat_decode_field( NULL, p, session_timeout );
    user_obj.session_timeout = atol( (char*)session_timeout_decode->data );
-   /* cchat_decode_field( p, flags_ws ); */
-   /* TODO: Decode flags. */
+
+   /* Decode websocket flags checkbox. */
+   cchat_decode_field( "off", p, flags_ws );
+   if( biseqStatic( flags_ws_decode, "on" ) ) {
+      user_obj.flags |= CHATDB_USER_FLAG_WS;
+   } else {
+      user_obj.flags &= ~CHATDB_USER_FLAG_WS;
+   }
 
    /* Validate passwords. */
    if( 0 != bstrcmp( password1, password2 ) ) {
@@ -349,17 +358,18 @@ int cchat_route_user(
    }
 
    /* Validate user field. */
-   retval = binchr( user_decode, 0, &user_forbidden_chars );
+   retval = binchr( user_obj.user_name, 0, &user_forbidden_chars );
    if( BSTR_ERR != retval ) {
       retval = RETVAL_PARAMS;
-      dbglog_error( "invalid username specified: %s\n", bdata( user_decode ) );
+      dbglog_error( "invalid username specified: %s\n",
+         bdata( user_obj.user_name ) );
       err_msg = bformat( "Invalid username specified!" );
       bcgi_check_null( err_msg );
       goto cleanup;
    }
    retval = 0; /* Reset retval. */
 
-   dbglog_debug( 1, "adding user: %s\n", bdata( user_decode ) );
+   dbglog_debug( 1, "adding user: %s\n", bdata( user_obj.user_name ) );
 
    /* TODO: Redo add user, add ORM and translate flags checkbox. */
    retval = chatdb_add_user( op, &user_obj, password1_decode, &err_msg );
@@ -391,9 +401,7 @@ cleanup:
    bcgi_cleanup_bstr( csrf_decode, likely );
    bcgi_cleanup_bstr( session, likely );
    bcgi_cleanup_bstr( email, likely );
-   bcgi_cleanup_bstr( email_decode, likely );
    bcgi_cleanup_bstr( user, likely );
-   bcgi_cleanup_bstr( user_decode, likely );
    bcgi_cleanup_bstr( password1, likely );
    bcgi_cleanup_bstr( password1_decode, likely );
    bcgi_cleanup_bstr( password2, likely );
@@ -538,8 +546,8 @@ int cchat_route_auth(
    }
 
    /* There is POST data, so try to decode it. */
-   cchat_decode_field( p, user );
-   cchat_decode_field( p, password );
+   cchat_decode_field( NULL, p, user );
+   cchat_decode_field( NULL, p, password );
 
    /* Validate username and password. */
    user_obj.user_name = bstrcpy( user_decode );
@@ -629,7 +637,7 @@ int cchat_route_send(
       goto cleanup;
    }
 
-   cchat_decode_field( p, csrf );
+   cchat_decode_field( NULL, p, csrf );
 
    /* Validate CSRF token. */
    if( 0 != bstrcmp( csrf_decode, session ) ) {
@@ -641,7 +649,7 @@ int cchat_route_send(
    }
 
    /* There is POST data, so try to decode it. */
-   cchat_decode_field( p, chat );
+   cchat_decode_field( NULL, p, chat );
 
    retval = chatdb_send_message( op, auth_user_id, chat_decode, &err_msg );
    if( retval ) {
@@ -725,8 +733,6 @@ cleanup:
    return retval;
 }
 
-#define USE_WEBSOCKETS 1
-
 int cchat_route_chat(
    struct CCHAT_OP_DATA* op, int auth_user_id,
    struct bstrList* q, struct bstrList* p, struct bstrList* c
@@ -737,6 +743,7 @@ int cchat_route_chat(
    bstring session = NULL;
    bstring mini = NULL;
    struct WEBUTIL_PAGE page = { 0, 0, 0 };
+   struct CHATDB_USER user;
 
    page.title = &page_title;
    page.flags = 0;
@@ -753,22 +760,73 @@ int cchat_route_chat(
       goto cleanup;
    }
 
+   /* Grab user properties for preferences. */
+   memset( &user, '\0', sizeof( struct CHATDB_USER ) );
+   user.user_id = auth_user_id;
+   retval = chatdb_iter_users( NULL, op, NULL, &user, NULL, NULL );
+   if( retval ) {
+      dbglog_error( "error fetching user!\n" );
+      goto cleanup;
+   }
+
    page.text = bfromcstr( "" );
    bcgi_check_null( page.text );
 
-#ifdef USE_WEBSOCKETS
+   if( CHATDB_USER_FLAG_WS == (CHATDB_USER_FLAG_WS & user.flags) ) {
+      /* Add refresher/convenience script. */
+      retval = webutil_add_script( &page,
+         "<script src=\"https://code.jquery.com/jquery-2.2.4.min.js\" integrity=\"sha256-BbhdlvQf/xTY9gja0Dq3HiwQF8LaCRTXxZKRutelT44=\" crossorigin=\"anonymous\"></script>\n" );
+      retval = webutil_add_script( &page,
+         "<script type=\"text/javascript\" src=\"chat.js\"></script>\n" );
+   }
 
-   /* Add refresher/convenience script. */
-   retval = webutil_add_script( &page,
-      "<script src=\"https://code.jquery.com/jquery-2.2.4.min.js\" integrity=\"sha256-BbhdlvQf/xTY9gja0Dq3HiwQF8LaCRTXxZKRutelT44=\" crossorigin=\"anonymous\"></script>\n" );
-   retval = webutil_add_script( &page,
-      "<script type=\"text/javascript\" src=\"chat.js\"></script>\n" );
-
-#else
-
+   /* Show frameset section based on GET string. */
    bcgi_query_key( q, "mini", &mini );
-
    if( NULL == mini ) {
+      mini = bfromcstr( "" );
+      bcgi_check_null( mini );
+   }
+
+   dbglog_debug( 1, "YYY: flags: %d\n", user.flags );
+
+   if(
+      CHATDB_USER_FLAG_WS != (CHATDB_USER_FLAG_WS & user.flags) &&
+      biseqcaselessStatic( mini, "nav" )
+   ) {
+      dbglog_debug( 1, "showing nav...\n" );
+
+      /* Only show built-in page nav. */
+
+   } else if(
+      CHATDB_USER_FLAG_WS != (CHATDB_USER_FLAG_WS & user.flags) &&
+      biseqcaselessStatic( mini, "top" )
+   ) {
+      dbglog_debug( 1, "showing top frame...\n" );
+
+      /* We're in a frame, so remove decorations. */
+      page.flags |= WEBUTIL_PAGE_FLAG_NOTITLE;
+      page.flags |= WEBUTIL_PAGE_FLAG_NONAV;
+
+      /* Add auto-refresh. */
+      retval = webutil_add_script( &page,
+         "<meta http-equiv=\"refresh\" content=\"2\" />\n" );
+   
+   } else if( 
+      CHATDB_USER_FLAG_WS != (CHATDB_USER_FLAG_WS & user.flags) &&
+      biseqcaselessStatic( mini, "bottom" )
+   ) {
+      dbglog_debug( 1, "showing bottom frame...\n" );
+
+      /* Remove page decorations for chat box. */
+      page.flags |= WEBUTIL_PAGE_FLAG_NOTITLE;
+      page.flags |= WEBUTIL_PAGE_FLAG_NONAV;
+
+   } else if(
+      CHATDB_USER_FLAG_WS != (CHATDB_USER_FLAG_WS & user.flags)
+   ) {
+      dbglog_debug( 1, "showing frameset...\n" );
+
+      /* Show the outside frameset. */
       page.flags |= WEBUTIL_PAGE_FLAG_NOBODY;
       page.flags |= WEBUTIL_PAGE_FLAG_NONAV;
       page.flags |= WEBUTIL_PAGE_FLAG_NOTITLE;
@@ -780,21 +838,13 @@ int cchat_route_chat(
             "<frame name=\"bottom\" src=\"/chat?mini=bottom\" />"
          "</frameset>" );
       bcgi_check_bstr_err( page.text );
+   }
 
-   } else if( biseqcaselessStatic( mini, "nav" ) ) {
-
-   } else if( biseqcaselessStatic( mini, "top" ) ) {
-      /* Show current messages. */
-
-      /* Remove page decorations. */
-      page.flags |= WEBUTIL_PAGE_FLAG_NOTITLE;
-      page.flags |= WEBUTIL_PAGE_FLAG_NONAV;
-
-      /* Add auto-refresh. */
-      retval = webutil_add_script( &page,
-         "<meta http-equiv=\"refresh\" content=\"2\" />\n" );
-#endif /* !USE_WEBSOCKETS */
-
+   /* Show messages if we have websockets or are in the message frame. */
+   if(
+      CHATDB_USER_FLAG_WS == (CHATDB_USER_FLAG_WS & user.flags) ||
+      biseqcaselessStatic( mini, "top" )
+   ) {
       retval = bcatcstr( page.text, "<table class=\"chat-messages\">\n" );
       bcgi_check_bstr_err( page.text );
 
@@ -807,15 +857,13 @@ int cchat_route_chat(
 
       retval = bcatcstr( page.text, "</table>\n" );
       bcgi_check_bstr_err( page.text );
+   }
 
-#ifndef USE_WEBSOCKETS
-   } else if( biseqcaselessStatic( mini, "bottom" ) ) {
-      /* Remove page decorations. */
-      page.flags |= WEBUTIL_PAGE_FLAG_NOTITLE;
-      page.flags |= WEBUTIL_PAGE_FLAG_NONAV;
-#endif /* !USE_WEBSOCKETS */
-
-      /* See if a valid session exists (don't urldecode!). */
+   if(
+      CHATDB_USER_FLAG_WS == (CHATDB_USER_FLAG_WS & user.flags) ||
+      biseqcaselessStatic( mini, "bottom" )
+   ) {
+      /* Grab the session for CSRF use. */
       retval = bcgi_query_key( c, "session", &session );
       if( retval || NULL == session ) {
          dbglog_error( "unable to determine session cookie hash!\n" );
@@ -835,13 +883,13 @@ int cchat_route_chat(
          "</div>\n",
          bdata( session ) );
       bcgi_check_bstr_err( page.text );
-#ifndef USE_WEBSOCKETS
    }
-#endif /* !USE_WEBSOCKETS */
 
    retval = webutil_show_page( &(op->req), q, p, &page );
 
 cleanup:
+
+   chatdb_free_user( &user );
 
    bcgi_cleanup_bstr( page.scripts, likely );
    bcgi_cleanup_bstr( mini, likely );

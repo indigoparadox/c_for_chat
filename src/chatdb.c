@@ -537,8 +537,6 @@ int chatdb_add_user(
    sqlite3_stmt* stmt;
    int i = 0;
 
-   dbglog_debug( 1, "%d - %s\n", user->user_id, bdata( password ) );
-
    if( 0 == blength( user->user_name ) ) {
       *err_msg_p = bfromcstr( "Username cannot be empty!" );
       retval = RETVAL_PARAMS;
@@ -832,40 +830,10 @@ int chatdb_dbcb_users( void* arg, int argc, char** argv, char **col ) {
    }
 
    #define CHATDB_USER_TABLE_ASSIGN( idx, u, field, c_type, db_type ) \
+      dbglog_debug( 1, "XXX user->" #field " = %s\n", argv[idx] ); \
       chatdb_assign_ ## c_type ( &(arg_struct->user->field), argv[idx] );
 
    CHATDB_USER_TABLE( CHATDB_USER_TABLE_ASSIGN );
-
-#if 0
-   user_name = bfromcstr( argv[1] );
-   if( NULL == user_name ) { 
-      dbglog_error( "error allocating user_name!\n" );
-      retval = RETVAL_ALLOC;
-      goto cleanup;
-   }
-
-   email = bfromcstr( argv[2] );
-   if( NULL == email && NULL != argv[2] ) { 
-      dbglog_error( "error allocating email!\n" );
-      retval = RETVAL_ALLOC;
-      goto cleanup;
-   }
-
-   hash = bfromcstr( argv[3] );
-   if( NULL == hash ) { 
-      dbglog_error( "error allocating hash!\n" );
-      retval = RETVAL_ALLOC;
-      goto cleanup;
-   }
-
-   assert( NULL == arg_struct->user->hash );
-   arg_struct->user->salt = bfromcstr( argv[5] );
-   bcgi_check_null( arg_struct->user->salt );
-
-   assert( NULL == arg_struct->user->salt );
-   arg_struct->user->salt = bfromcstr( argv[5] );
-   bcgi_check_null( arg_struct->user->salt );
-#endif
 
    if( NULL != arg_struct->cb_user ) {
       retval = arg_struct->cb_user(
@@ -876,24 +844,6 @@ int chatdb_dbcb_users( void* arg, int argc, char** argv, char **col ) {
    }
 
 cleanup:
-
-#if 0
-   if( NULL != user_name ) {
-      bdestroy( user_name );
-   }
-
-   if( NULL != email ) {
-      bdestroy( email );
-   }
-
-   if( NULL != hash ) {
-      bdestroy( hash );
-   }
-
-   if( NULL != salt ) {
-      bdestroy( salt );
-   }
-#endif
 
    return retval;
 }
