@@ -57,6 +57,7 @@ struct BCGI_JSON_NODE_LIST {
 #define bcgi_cleanup_bstr( b, l ) \
    if( bcgi_ ## l( NULL != b ) ) { \
       bdestroy( b ); \
+      b = NULL; \
    }
 
 #define bcgi_check_bstr_err( b ); \

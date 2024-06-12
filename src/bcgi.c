@@ -409,11 +409,13 @@ int bcgi_b64_encode( unsigned char* in, size_t in_sz, bstring* out_p ) {
          str_sz, encoded_sz );
    }
 
-   *out_p = bfromcstr( (char*)str );
    if( NULL == *out_p ) {
-      dbglog_error( "could not allocate encoded bstring!\n" );
-      retval = RETVAL_ALLOC;
-      goto cleanup;
+      *out_p = bfromcstr( (char*)str );
+      bcgi_check_null( *out_p );
+   } else {
+      dbglog_debug( 1, "overwriting existing string with encoding...\n" );
+      retval = bassigncstr( *out_p, (char*)str );
+      bcgi_check_bstr_err( *out_p );
    }
  
 cleanup:
@@ -469,7 +471,10 @@ int bcgi_generate_salt( bstring* out_p, size_t salt_sz ) {
    int retval = 0;
    unsigned char* salt_bin = NULL;
 
-   assert( NULL == *out_p );
+   if( NULL == *out_p ) {
+      *out_p = bfromcstr( "" );
+      bcgi_check_null( *out_p );
+   }
 
    salt_bin = calloc( salt_sz, 1 );
    bcgi_check_null( salt_bin );

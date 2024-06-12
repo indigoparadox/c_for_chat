@@ -72,8 +72,6 @@ static int cchat_profile_form(
 ) {
    int retval = 0;
 
-   assert( NULL == user_name || NULL != session );
-
    retval = bassignformat(
       page->text,
       "<div class=\"profile-form\">\n"
