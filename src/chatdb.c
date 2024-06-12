@@ -830,7 +830,6 @@ int chatdb_dbcb_users( void* arg, int argc, char** argv, char **col ) {
    }
 
    #define CHATDB_USER_TABLE_ASSIGN( idx, u, field, c_type, db_type ) \
-      dbglog_debug( 1, "XXX user->" #field " = %s\n", argv[idx] ); \
       chatdb_assign_ ## c_type ( &(arg_struct->user->field), argv[idx] );
 
    CHATDB_USER_TABLE( CHATDB_USER_TABLE_ASSIGN );
@@ -955,9 +954,6 @@ int chatdb_add_session(
       goto cleanup;
    }
 
-   /* XXX */
-   dbglog_debug( 1, "%s\n", query );
-
    pthread_mutex_lock( &(op->db_mutex) );
    retval = sqlite3_exec( op->db, query, NULL, NULL, &err_msg );
    pthread_mutex_unlock( &(op->db_mutex) );
@@ -1031,8 +1027,8 @@ int chatdb_iter_sessions(
          "strftime('%%s', start_time) from sessions "
          "where hash = '%q' and remote_host = '%q'",
       bdata( hash ), bdata( remote_host ) );
-   /* XXX */
-   dbglog_debug( 1, "query: %s\n", query );
+
+   dbglog_debug( 0, "query: %s\n", query );
    if( NULL == query ) {
       dbglog_error( "could not allocate database session select!\n" );
       retval = RETVAL_ALLOC;

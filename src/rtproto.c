@@ -12,8 +12,11 @@ static int rtproto_cmd_privmsg(
 ) {
    int retval = 0;
    bstring msg = NULL;
+   bstring msg_raw = NULL;
+   bstring ts_b = NULL;
    int msg_pos = 0;
    struct CHATDB_USER user;
+   time_t t = 0;
 
    memset( &user, '\0', sizeof( struct CHATDB_USER ) );
 
@@ -32,15 +35,34 @@ static int rtproto_cmd_privmsg(
       retval = RETVAL_PARAMS;
       goto cleanup;
    }
-   msg = bmidstr( line, msg_pos + 1, blength( line ) - (msg_pos + 1) );
-   bcgi_check_null( msg );
-   retval = btrimws( msg );
+   msg_raw = bmidstr( line, msg_pos + 1, blength( line ) - (msg_pos + 1) );
+   bcgi_check_null( msg_raw );
+   retval = btrimws( msg_raw );
    bcgi_check_bstr_err( retval );
 
+   if( 0 == blength( msg_raw ) ) {
+      goto cleanup;
+   }
+
+   /* Sanitize HTML entities from the message before sending out. */
+   retval = bcgi_html_escape( msg_raw, &msg );
+
+   /* Prepend timestamp. */
+   t = time( NULL );
+   ts_b = bformat( "%d ", t );
+   bcgi_check_null( ts_b );
+   retval = binsert( msg, 0, ts_b, '\0' );
+   bcgi_check_bstr_err( msg );
+
+   /* Prepend destination PRIVMSG command. */
    retval = binsertStatic( msg, 0, " PRIVMSG: ", '\0' );
    bcgi_check_bstr_err( msg );
+
+   /* Prepend our user name as sender. */
    retval = binsert( msg, 0, user.user_name, '\0' );
    bcgi_check_bstr_err( msg );
+
+   /* Prepend ":" prefix for user name. */
    retval = binsertStatic( msg, 0, ":", '\0' );
    bcgi_check_bstr_err( msg );
 
@@ -49,6 +71,8 @@ static int rtproto_cmd_privmsg(
 cleanup:
 
    bcgi_cleanup_bstr( msg, likely );
+   bcgi_cleanup_bstr( msg_raw, likely );
+   bcgi_cleanup_bstr( ts_b, likely );
 
    chatdb_free_user( &user );
 

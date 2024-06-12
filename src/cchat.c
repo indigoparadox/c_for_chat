@@ -748,6 +748,8 @@ int cchat_route_chat(
    page.title = &page_title;
    page.flags = 0;
 
+   memset( &user, '\0', sizeof( struct CHATDB_USER ) );
+
    if( 0 > auth_user_id ) {
       dbglog_debug( 3, "/chat access by unauthorized user!\n" );
 
@@ -786,8 +788,6 @@ int cchat_route_chat(
       mini = bfromcstr( "" );
       bcgi_check_null( mini );
    }
-
-   dbglog_debug( 1, "YYY: flags: %d\n", user.flags );
 
    if(
       CHATDB_USER_FLAG_WS != (CHATDB_USER_FLAG_WS & user.flags) &&
@@ -877,7 +877,8 @@ int cchat_route_chat(
          "<div class=\"chat-form\">\n"
          "<form action=\"/send\" method=\"post\">\n"
             "<input type=\"text\" id=\"chat\" name=\"chat\" />\n"
-            "<input type=\"submit\" name=\"submit\" value=\"Send\" />\n"
+            "<input type=\"submit\" name=\"submit\" "
+               "id=\"send\" value=\"Send\" />\n"
             "<input type=\"hidden\" name=\"csrf\" value=\"%s\" />\n"
          "</form>\n"
          "</div>\n",
