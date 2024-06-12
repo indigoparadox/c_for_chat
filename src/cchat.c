@@ -51,6 +51,7 @@ int cchat_route_logout(
 ) {
    int retval = 0;
    bstring session = NULL;
+   const struct tagbstring cs_login = bsStatic( "/login" );
 
    /* See if a valid session exists (don't urldecode!). */
    retval = bcgi_query_key( c, "session", &session );
@@ -59,10 +60,7 @@ int cchat_route_logout(
    }
 
    /* Redirect to route. */
-   FCGX_FPrintF( op->req.out, "Status: 303 See Other\r\n" );
-   FCGX_FPrintF( op->req.out, "Location: /login\r\n" );
-   FCGX_FPrintF( op->req.out, "Cache-Control: no-cache\r\n" );
-   FCGX_FPrintF( op->req.out, "\r\n" ); 
+   webutil_redirect( &(op->req), &cs_login, 0 );
 
    if( NULL != session ) {
       bdestroy( session );
@@ -270,6 +268,7 @@ int cchat_route_user(
    bstring session_timeout_decode = NULL;
    bstring flags_ws = NULL;
    bstring flags_ws_decode = NULL;
+   bstring redirect_url = NULL;
    struct tagbstring user_forbidden_chars = bsStatic( "&?* \n\r" );
    struct CHATDB_USER user_obj;
 
@@ -378,20 +377,19 @@ int cchat_route_user(
 cleanup:
 
    /* Redirect to route. */
-   FCGX_FPrintF( op->req.out, "Status: 303 See Other\r\n" );
    if( NULL != err_msg ) {
-      FCGX_FPrintF(
-         op->req.out, "Location: /profile?error=%s\r\n", bdata( err_msg ) );
+      redirect_url = bformat( "/profile?error=%s", bdata( err_msg ) );
    } else if( 0 <= auth_user_id ) {
-      FCGX_FPrintF( op->req.out, "Location: /profile\r\n" );
+      redirect_url = bfromcstr( "/profile" );
    } else {
-      FCGX_FPrintF( op->req.out, "Location: /login\r\n" );
+      redirect_url = bfromcstr( "/login" );
    }
-   FCGX_FPrintF( op->req.out, "Cache-Control: no-cache\r\n" );
-   FCGX_FPrintF( op->req.out, "\r\n" ); 
+   bcgi_check_null( redirect_url );
+   webutil_redirect( &(op->req), redirect_url, 0 );
 
    chatdb_free_user( &(user_obj) );
 
+   bcgi_cleanup_bstr( redirect_url, likely );
    bcgi_cleanup_bstr( flags_ws, likely );
    bcgi_cleanup_bstr( flags_ws_decode, likely );
    bcgi_cleanup_bstr( session_timeout, likely );
@@ -517,6 +515,7 @@ int cchat_route_auth(
    bstring remote_host = NULL;
    bstring recaptcha = NULL;
    bstring recaptcha_decode = NULL;
+   bstring redirect_url = NULL;
    struct CHATDB_USER user_obj;
 
    memset( &user_obj, '\0', sizeof( struct CHATDB_USER ) );
@@ -585,16 +584,15 @@ int cchat_route_auth(
 cleanup:
 
    /* Redirect to route. */
-   FCGX_FPrintF( op->req.out, "Status: 303 See Other\r\n" );
    if( NULL != err_msg ) {
-      FCGX_FPrintF(
-         op->req.out, "Location: /login?error=%s\r\n", bdata( err_msg ) );
+      redirect_url = bformat( "/login?error=%s", bdata( err_msg ) );
    } else {
-      FCGX_FPrintF( op->req.out, "Location: /chat\r\n" );
+      redirect_url = bfromcstr( "/chat" );
    }
-   FCGX_FPrintF( op->req.out, "Cache-Control: no-cache\r\n" );
-   FCGX_FPrintF( op->req.out, "\r\n" );
+   bcgi_check_null( redirect_url );
+   webutil_redirect( &(op->req), redirect_url, 0 );
 
+   bcgi_cleanup_bstr( redirect_url, likely );
    bcgi_cleanup_bstr( remote_host, likely );
    bcgi_cleanup_bstr( hash, likely );
    bcgi_cleanup_bstr( user, likely );
@@ -622,6 +620,7 @@ int cchat_route_send(
    bstring session = NULL;
    bstring csrf = NULL;
    bstring csrf_decode = NULL;
+   bstring redirect_url = NULL;
 
    dbglog_debug( 1, "route: send\n" );
 
@@ -660,39 +659,23 @@ int cchat_route_send(
 cleanup:
 
    /* Redirect to route. */
-   FCGX_FPrintF( op->req.out, "Status: 303 See Other\r\n" );
    if( NULL != err_msg ) {
-      FCGX_FPrintF(
-         op->req.out, "Location: /chat?error=%s\r\n", bdata( err_msg ) );
+      /* TODO: Include mini=bottom if frames enabled! */
+      redirect_url = bformat( "/chat?error=%s", bdata( err_msg ) );
    } else {
-      FCGX_FPrintF( op->req.out, "Location: /chat?mini=bottom\r\n" );
+      /* TODO: Don't include mini=bottom if frames not enabled! */
+      redirect_url = bfromcstr( "/chat?mini=bottom" );
    }
-   FCGX_FPrintF( op->req.out, "Cache-Control: no-cache\r\n" );
-   FCGX_FPrintF( op->req.out, "\r\n" );
+   bcgi_check_null( redirect_url );
+   webutil_redirect( &(op->req), redirect_url, 0 );
 
-   if( NULL != csrf ) {
-      bdestroy( csrf );
-   }
-
-   if( NULL != csrf_decode ) {
-      bdestroy( csrf_decode );
-   }
-
-   if( NULL != session ) {
-      bdestroy( session );
-   }
-
-   if( NULL != chat_decode ) {
-      bdestroy( chat_decode );
-   }
-
-   if( NULL != chat ) {
-      bdestroy( chat );
-   }
-
-   if( NULL != err_msg ) {
-      bdestroy( err_msg );
-   }
+   bcgi_cleanup_bstr( redirect_url, likely );
+   bcgi_cleanup_bstr( csrf, likely );
+   bcgi_cleanup_bstr( csrf_decode, likely );
+   bcgi_cleanup_bstr( session, likely );
+   bcgi_cleanup_bstr( chat, likely );
+   bcgi_cleanup_bstr( chat_decode, likely );
+   bcgi_cleanup_bstr( err_msg, unlikely );
 
    return retval;
 }

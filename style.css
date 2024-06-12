@@ -1,8 +1,13 @@
 
+@media (prefers-color-scheme: dark) {
+   body {
+      background: black;
+      color: white;
+   }
+}
+
 body {
    margin: 0;
-   background: black;
-   color: white;
 }
 
 .page-title {

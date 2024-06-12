@@ -20,8 +20,8 @@
    f(  5,  5, salt,            bstring, "text not null" ) \
    f(  6,  6, iters,           int,     "integer not null" ) \
    f(  7, -1, join_time,       time_t,  "datetime default current_timestamp" ) \
-   f(  8, -1, session_timeout, int,     "integer default 3600" ) \
-   f(  9,  7, flags,           int,     "integer default 0" )
+   f(  8,  7, session_timeout, int,     "integer default 3600" ) \
+   f(  9,  8, flags,           int,     "integer default 0" )
 
 #define chatdb_free_user( u ) \
    bcgi_cleanup_bstr( (u)->user_name, likely ) \

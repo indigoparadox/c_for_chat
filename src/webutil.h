@@ -30,5 +30,7 @@ int webutil_check_recaptcha( FCGX_Request* req, bstring recaptcha );
 
 int webutil_get_cookies( struct bstrList** out_p, struct CCHAT_OP_DATA* op );
 
+int webutil_redirect( FCGX_Request* req, const_bstring url, uint8_t flags );
+
 #endif /* !WEBUTIL_H */
 

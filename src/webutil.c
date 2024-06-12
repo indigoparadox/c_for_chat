@@ -277,3 +277,14 @@ cleanup:
    return retval;
 }
 
+int webutil_redirect( FCGX_Request* req, const_bstring url, uint8_t flags ) {
+   int retval = 0;
+
+   FCGX_FPrintF( req->out, "Status: 303 See Other\r\n" );
+   FCGX_FPrintF( req->out, "Location: %s\r\n", bdata( url ) );
+   FCGX_FPrintF( req->out, "Cache-Control: no-cache\r\n" );
+   FCGX_FPrintF( req->out, "\r\n" ); 
+
+   return retval;
+}
+

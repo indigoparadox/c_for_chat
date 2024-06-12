@@ -497,6 +497,7 @@ static int _chatdb_bind_int( sqlite3_stmt* stmt, int* i_p, int value ) {
    int retval = 0;
 
    assert( NULL != stmt );
+   dbglog_debug( 1, "binding value: %d\n", value );
    retval = sqlite3_bind_int( stmt, (*i_p)++, value );
    if( SQLITE_OK != retval ) {
       dbglog_error( "error: %d\n", retval );
@@ -517,6 +518,7 @@ static int _chatdb_bind_bstring( sqlite3_stmt* stmt, int* i_p, bstring value ) {
    int retval = 0;
 
    assert( NULL != stmt );
+   dbglog_debug( 1, "binding value: %s\n", bdata( value ) );
    retval = sqlite3_bind_text(
       stmt, (*i_p)++, bdata( value ), blength( value ), SQLITE_STATIC );
    if( SQLITE_OK != retval ) {
