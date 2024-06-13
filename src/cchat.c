@@ -24,9 +24,35 @@ extern bstring g_recaptcha_secret_key;
    f( "/", cchat_route_root, "GET" ) \
    f( "", NULL, "" )
 
+#define cchat_check_null( err_msg, rv, field ) \
+   if( NULL == field ) { \
+      if( RETVAL_ALLOC == rv ) { \
+         dbglog_error( #field " was NULL!\n" ); \
+      } else { \
+         dbglog_debug( 2, #field " was NULL!\n" ); \
+      } \
+      retval = rv; \
+      goto cleanup; \
+   }
+
+#define cchat_check_bstr_err( err_msg, rv, field ) \
+   bcgi_check_bstr_err( field )
+
+#define cchat_check_true( cond_true, err_msg, ... ) \
+   if( !(cond_true) ) { \
+      assert( NULL == err_msg ); \
+      err_msg = bformat( __VA_ARGS__ ); \
+      dbglog_debug( 2, "%s\n", bdata( err_msg ) ); \
+      cchat_check_null( NULL, RETVAL_ALLOC, err_msg ); \
+      webutil_server_error( &(op->req), err_msg ); \
+      retval = RETVAL_PARAMS; \
+      goto cleanup; \
+   }
+
 #define cchat_decode_field_rename( def, list, f_name, decode_name, post_name ) \
    retval = bcgi_query_key( list, #post_name, &f_name ); \
    if( retval || (NULL == def && NULL == f_name) ) { \
+      /* TODO: 500 error? */ \
       err_msg = bfromcstr( "Invalid " #post_name "!" ); \
       dbglog_error( "no " #post_name " found!\n" ); \
       retval = RETVAL_PARAMS; \
@@ -34,6 +60,7 @@ extern bstring g_recaptcha_secret_key;
    } else if( !retval && NULL != f_name ) { \
       retval = bcgi_urldecode( f_name, &(decode_name) ); \
       if( retval ) { \
+         /* TODO: 500 error? */ \
          goto cleanup; \
       } \
    } else { \
@@ -71,7 +98,7 @@ int cchat_route_logout(
 
 static int cchat_profile_form(
    struct WEBUTIL_PAGE* page, bstring user_name, bstring email, bstring session,
-   int session_timeout, int flags
+   int session_timeout, int flags, bstring* err_msg_p
 ) {
    int retval = 0;
 
@@ -109,21 +136,15 @@ static int cchat_profile_form(
          " checked=\"checked\"" : ""
    );
 
-   if( BSTR_ERR == retval ) {
-      dbglog_error( "unable to allocate profile form!\n" );
-      retval = RETVAL_ALLOC;
-      goto cleanup;
-   }
+   cchat_check_bstr_err( err_msg, RETVAL_ALLOC, page->text );
+   cchat_check_null( err_msg, RETVAL_ALLOC, page->text );
 
    if( NULL != session ) {
       retval = bformata( page->text,
          "<input type=\"hidden\" name=\"csrf\" value=\"%s\" />\n",
          bdata( session ) );
-      if( BSTR_ERR == retval ) {
-         dbglog_error( "unable to allocate profile form!\n" );
-         retval = RETVAL_ALLOC;
-         goto cleanup;
-      }
+      cchat_check_bstr_err( err_msg, RETVAL_ALLOC, page->text );
+      cchat_check_null( err_msg, RETVAL_ALLOC, page->text );
    }
 
    if( NULL != bdata( g_recaptcha_site_key ) ) {
@@ -131,11 +152,8 @@ static int cchat_profile_form(
       retval = bformata( page->text,
          "<div class=\"g-recaptcha\" data-sitekey=\"%s\"></div>\n",
          bdata( g_recaptcha_site_key ) );
-      if( BSTR_ERR == retval ) {
-         dbglog_error( "unable to allocate profile form!\n" );
-         retval = RETVAL_ALLOC;
-         goto cleanup;
-      }
+      cchat_check_bstr_err( err_msg, RETVAL_ALLOC, page->text );
+      cchat_check_null( err_msg, RETVAL_ALLOC, page->text );
 
       retval = webutil_add_script( page,
          "<script src=\"https://www.google.com/recaptcha/api.js\" "
@@ -149,11 +167,7 @@ static int cchat_profile_form(
       "<div class=\"profile-field profile-button\">"
          "<input type=\"submit\" name=\"submit\" value=\"Submit\" />"
       "</div>\n</form>\n</div>\n" );
-   if( BSTR_ERR == retval ) {
-      dbglog_error( "unable to allocate profile form!\n" );
-      retval = RETVAL_ALLOC;
-      goto cleanup;
-   }
+   cchat_check_bstr_err( err_msg, RETVAL_ALLOC, page->text );
  
 cleanup:
 
@@ -168,6 +182,7 @@ int cchat_profile_user_cb(
    bstring session = NULL;
    bstring req_cookie = NULL;
    struct bstrList* c = NULL;
+   bstring err_msg = NULL;
 
    if( webutil_get_cookies( &c, op ) ) {
       goto cleanup;
@@ -182,7 +197,12 @@ int cchat_profile_user_cb(
 
    retval = cchat_profile_form(
       page, user->user_name, user->email, session, user->session_timeout,
-      user->flags );
+      user->flags, &err_msg );
+   if( retval ) {
+      webutil_server_error( &(op->req), err_msg );
+      dbglog_debug(
+         2, "error rendering profile form: %s\n", bdata( err_msg ) );
+   }
 
 cleanup:
 
@@ -198,6 +218,8 @@ cleanup:
       bdestroy( session );
    }
 
+   bcgi_cleanup_bstr( err_msg, unlikely );
+
    return retval;
 }
 
@@ -210,17 +232,14 @@ int cchat_route_profile(
    struct WEBUTIL_PAGE page = { 0, 0, 0 };
    struct tagbstring empty_string = bsStatic( "" );
    struct CHATDB_USER user;
+   bstring err_msg = NULL;
 
    memset( &user, '\0', sizeof( struct CHATDB_USER ) );
 
    page.title = &page_title;
    page.flags = 0;
    page.text = bfromcstr( "" );
-   if( NULL == page.text ) {
-      retval = RETVAL_ALLOC;
-      dbglog_error( "could not allocate profile form!\n" );
-      goto cleanup;
-   }
+   cchat_check_null( err_msg, RETVAL_ALLOC, page.text );
 
    if( 0 <= auth_user_id ) {
       /* Edit an existing user. */
@@ -232,7 +251,13 @@ int cchat_route_profile(
       }
    } else {
       retval = cchat_profile_form(
-         &page, &empty_string, &empty_string, NULL, 3600, 0 );
+         &page, &empty_string, &empty_string, NULL, 3600, 0, &err_msg );
+      if( retval ) {
+         webutil_server_error( &(op->req), err_msg );
+         dbglog_debug(
+            2, "error rendering profile form: %s\n", bdata( err_msg ) );
+         goto cleanup;
+      }
    }
 
    retval = webutil_show_page( &(op->req), q, p, &page );
@@ -241,6 +266,7 @@ cleanup:
 
    bcgi_cleanup_bstr( page.scripts, likely );
    bcgi_cleanup_bstr( page.text, likely );
+   bcgi_cleanup_bstr( err_msg, unlikely );
 
    chatdb_free_user( &user );
 
@@ -276,61 +302,38 @@ int cchat_route_user(
 
    dbglog_debug( 1, "route: user\n" );
 
-   if( NULL == p ) {
-      assert( NULL == err_msg );
-      err_msg = bfromcstr( "Invalid message format!" );
-      goto cleanup;
-   }
+   cchat_check_null( err_msg, RETVAL_ALLOC, p );
 
    if( 0 <= auth_user_id ) {
       /* TODO: Better CSRF. */
 
       /* See if a valid session exists (don't urldecode!). */
       retval = bcgi_query_key( c, "session", &session );
-      if( retval || NULL == session ) {
-         dbglog_error( "unable to determine session cookie hash!\n" );
-         retval = RETVAL_PARAMS;
-         goto cleanup;
-      }
+      cchat_check_bstr_err( err_msg, RETVAL_ALLOC, session );
+      cchat_check_null( err_msg, RETVAL_ALLOC, session );
 
       cchat_decode_field( NULL, p, csrf );
 
       /* Validate CSRF token. */
-      if( 0 != bstrcmp( csrf_decode, session ) ) {
-         dbglog_error( "invalid csrf token!\n" );
-         assert( NULL == err_msg );
-         err_msg = bfromcstr( "Invalid CSRF token!" );
-         retval = RETVAL_PARAMS;
-         goto cleanup;
-      }
+      cchat_check_true(
+         !bstrcmp( csrf_decode, session ), err_msg, "Invalid CSRF token!" );
    }
 
    /* Grab recaptcha validation string if applicable. */
    bcgi_query_key( p, "g-recaptcha-response", &recaptcha );
    if( NULL != recaptcha ) {
       retval = bcgi_urldecode( recaptcha, &recaptcha_decode );
-      if( retval ) {
-         goto cleanup;
-      }
-      assert( NULL != recaptcha_decode );
+      cchat_check_null( err_msg, RETVAL_ALLOC, recaptcha_decode );
 
       retval = webutil_check_recaptcha( &(op->req), recaptcha_decode );
-      if( retval ) {
-         assert( NULL == err_msg );
-         err_msg = bfromcstr( "Invalid ReCAPTCHA response!" );
-         bcgi_check_null( err_msg );
-         goto cleanup;
-      }
+      cchat_check_true( !retval, err_msg, "Invalid ReCAPTCHA response!" );
    }
 
    if( 0 <= auth_user_id ) {
       /* We're editing an existing user, so grab that user. */
       user_obj.user_id = auth_user_id;
       retval = chatdb_iter_users( NULL, op, NULL, &user_obj, NULL, NULL );
-      if( retval ) {
-         dbglog_error( "error fetching user!\n" );
-         goto cleanup;
-      }
+      cchat_check_true( user_obj.user_name, err_msg, "Invalid user!" );
    }
 
    /* There is POST data, so try to decode it. */
@@ -350,28 +353,16 @@ int cchat_route_user(
    }
 
    /* Validate passwords. */
-   if( 0 != bstrcmp( password1, password2 ) ) {
-      dbglog_error( "password fields do not match!\n" );
-      err_msg = bfromcstr( "Password fields do not match!" );
-      bcgi_check_null( err_msg );
-      goto cleanup;
-   }
+   cchat_check_true( !bstrcmp( password1, password2 ), err_msg,
+      "Password fields do not match!" );
 
    /* Validate user field. */
-   retval = binchr( user_obj.user_name, 0, &user_forbidden_chars );
-   if( BSTR_ERR != retval ) {
-      retval = RETVAL_PARAMS;
-      dbglog_error( "invalid username specified: %s\n",
-         bdata( user_obj.user_name ) );
-      err_msg = bformat( "Invalid username specified!" );
-      bcgi_check_null( err_msg );
-      goto cleanup;
-   }
-   retval = 0; /* Reset retval. */
+   cchat_check_true(
+      BSTR_ERR == binchr( user_obj.user_name, 0, &user_forbidden_chars ),
+      err_msg, "Invalid username specified!" );
 
    dbglog_debug( 1, "adding user: %s\n", bdata( user_obj.user_name ) );
 
-   /* TODO: Redo add user, add ORM and translate flags checkbox. */
    retval = chatdb_add_user( op, &user_obj, password1_decode, &err_msg );
 
 cleanup:
@@ -384,7 +375,7 @@ cleanup:
    } else {
       redirect_url = bfromcstr( "/login" );
    }
-   bcgi_check_null( redirect_url );
+   cchat_check_null( err_msg, RETVAL_ALLOC, redirect_url );
    webutil_redirect( &(op->req), redirect_url, 0 );
 
    chatdb_free_user( &(user_obj) );
@@ -430,7 +421,7 @@ int cchat_route_login(
             "<input type=\"password\" id=\"password\" name=\"password\" />"
                "</div>\n"
    );
-   bcgi_check_null( page.text );
+   cchat_check_null( err_msg, RETVAL_ALLOC, page.text );
 
    if( NULL != bdata( g_recaptcha_site_key ) ) {
       /* Add recaptcha if key present. */
@@ -455,7 +446,7 @@ int cchat_route_login(
       "<div class=\"login-field login-button\">"
          "<input type=\"submit\" name=\"submit\" value=\"Login\" /></div>\n"
       "</form>\n</div>\n" );
-   bcgi_check_bstr_err( page.text );
+   cchat_check_bstr_err( err_msg, RETVAL_ALLOC, page.text );
 
    page.title = &page_title;
    page.flags = WEBUTIL_PAGE_FLAG_NONAV;
@@ -540,7 +531,7 @@ int cchat_route_auth(
       if( retval ) {
          assert( NULL == err_msg );
          err_msg = bfromcstr( "Invalid ReCAPTCHA response!" );
-         bcgi_check_null( err_msg );
+         cchat_check_null( err_msg, RETVAL_ALLOC, err_msg );
          goto cleanup;
       }
    }
@@ -557,10 +548,10 @@ int cchat_route_auth(
    if( retval || 0 > user_obj.user_id ) {
       if( NULL != err_msg ) {
          retval = bassigncstr( err_msg, "Invalid username or password!" );
-         bcgi_check_bstr_err( err_msg );
+         cchat_check_bstr_err( err_msg, RETVAL_ALLOC, err_msg );
       } else {
          err_msg = bfromcstr( "Invalid username or password!" );
-         bcgi_check_null( err_msg );
+         cchat_check_null( err_msg, RETVAL_ALLOC, err_msg );
       }
       goto cleanup;
    }
@@ -589,7 +580,7 @@ cleanup:
    } else {
       redirect_url = bfromcstr( "/chat" );
    }
-   bcgi_check_null( redirect_url );
+   cchat_check_null( err_msg, RETVAL_ALLOC, redirect_url );
    webutil_redirect( &(op->req), redirect_url, 0 );
 
    bcgi_cleanup_bstr( redirect_url, likely );
@@ -624,29 +615,18 @@ int cchat_route_send(
 
    dbglog_debug( 1, "route: send\n" );
 
-   if( NULL == p ) {
-      err_msg = bfromcstr( "Invalid message format!" );
-      goto cleanup;
-   }
+   cchat_check_null( err_msg, RETVAL_ALLOC, p );
 
    /* See if a valid session exists (don't urldecode!). */
    retval = bcgi_query_key( c, "session", &session );
-   if( retval || NULL == session ) {
-      dbglog_error( "unable to determine session cookie hash!\n" );
-      retval = RETVAL_PARAMS;
-      goto cleanup;
-   }
+   cchat_check_bstr_err( err_msg, RETVAL_ALLOC, session );
+   cchat_check_null( err_msg, RETVAL_ALLOC, session );
 
    cchat_decode_field( NULL, p, csrf );
 
    /* Validate CSRF token. */
-   if( 0 != bstrcmp( csrf_decode, session ) ) {
-      dbglog_error( "invalid csrf!\n" );
-      assert( NULL == err_msg );
-      err_msg = bfromcstr( "Invalid CSRF token!" );
-      retval = RETVAL_PARAMS;
-      goto cleanup;
-   }
+   cchat_check_true(
+      !bstrcmp( csrf_decode, session ), err_msg, "Invalid CSRF token!" );
 
    /* There is POST data, so try to decode it. */
    cchat_decode_field( NULL, p, chat );
@@ -666,7 +646,7 @@ cleanup:
       /* TODO: Don't include mini=bottom if frames not enabled! */
       redirect_url = bfromcstr( "/chat?mini=bottom" );
    }
-   bcgi_check_null( redirect_url );
+   cchat_check_null( err_msg, RETVAL_ALLOC, redirect_url );
    webutil_redirect( &(op->req), redirect_url, 0 );
 
    bcgi_cleanup_bstr( redirect_url, likely );
@@ -707,7 +687,7 @@ int cchat_print_msg_cb(
          "<td class=\"chat-time\">%s</td>"
       "</tr>\n",
       bdata( from ), bdata( text_escaped ), bdata( msg_time_f ) );
-   bcgi_check_bstr_err( page->text );
+   cchat_check_bstr_err( err_msg, RETVAL_ALLOC, page->text );
 
 cleanup:
 
@@ -728,6 +708,10 @@ int cchat_route_chat(
    bstring mini = NULL;
    struct WEBUTIL_PAGE page = { 0, 0, 0 };
    struct CHATDB_USER user;
+   const struct tagbstring cs_login_err_session =
+      bsStatic( "/login?error=Invalid session cookie!" );
+   const struct tagbstring cs_login_err_user =
+      bsStatic( "/login?error=Invalid user!" );
 
    page.title = &page_title;
    page.flags = 0;
@@ -736,13 +720,7 @@ int cchat_route_chat(
 
    if( 0 > auth_user_id ) {
       dbglog_debug( 3, "/chat access by unauthorized user!\n" );
-
-      /* Invalid user; redirect to login. */
-      FCGX_FPrintF( op->req.out, "Status: 303 See Other\r\n" );
-      FCGX_FPrintF( op->req.out,
-         "Location: /login?error=Invalid session cookie!\r\n" );
-      FCGX_FPrintF( op->req.out, "Cache-Control: no-cache\r\n" );
-      FCGX_FPrintF( op->req.out, "\r\n" );
+      webutil_redirect( &(op->req), &cs_login_err_session, 0 );
       goto cleanup;
    }
 
@@ -752,11 +730,12 @@ int cchat_route_chat(
    retval = chatdb_iter_users( NULL, op, NULL, &user, NULL, NULL );
    if( retval ) {
       dbglog_error( "error fetching user!\n" );
+      webutil_redirect( &(op->req), &cs_login_err_user, 0 );
       goto cleanup;
    }
 
    page.text = bfromcstr( "" );
-   bcgi_check_null( page.text );
+   cchat_check_null( err_msg, RETVAL_ALLOC, page.text );
 
    if( CHATDB_USER_FLAG_WS == (CHATDB_USER_FLAG_WS & user.flags) ) {
       /* Add refresher/convenience script. */
@@ -770,7 +749,7 @@ int cchat_route_chat(
    bcgi_query_key( q, "mini", &mini );
    if( NULL == mini ) {
       mini = bfromcstr( "" );
-      bcgi_check_null( mini );
+      cchat_check_null( err_msg, RETVAL_ALLOC, mini );
    }
 
    if(
@@ -821,7 +800,7 @@ int cchat_route_chat(
             "<frame name=\"main\" src=\"/chat?mini=top\" />"
             "<frame name=\"bottom\" src=\"/chat?mini=bottom\" />"
          "</frameset>" );
-      bcgi_check_bstr_err( page.text );
+      cchat_check_bstr_err( err_msg, RETVAL_ALLOC, page.text );
    }
 
    /* Show messages if we have websockets or are in the message frame. */
@@ -830,17 +809,18 @@ int cchat_route_chat(
       biseqcaselessStatic( mini, "top" )
    ) {
       retval = bcatcstr( page.text, "<table class=\"chat-messages\">\n" );
-      bcgi_check_bstr_err( page.text );
+      cchat_check_bstr_err( err_msg, RETVAL_ALLOC, page.text );
 
       retval = chatdb_iter_messages(
          &page, op, 0, 0, cchat_print_msg_cb, &err_msg );
       if( retval ) {
+         /* TODO: 500 error? */
          dbglog_error( "error iteraing messages!\n" );
          goto cleanup;
       }
 
       retval = bcatcstr( page.text, "</table>\n" );
-      bcgi_check_bstr_err( page.text );
+      cchat_check_bstr_err( err_msg, RETVAL_ALLOC, page.text );
    }
 
    if(
@@ -850,6 +830,7 @@ int cchat_route_chat(
       /* Grab the session for CSRF use. */
       retval = bcgi_query_key( c, "session", &session );
       if( retval || NULL == session ) {
+         /* TODO: 500 error? */
          dbglog_error( "unable to determine session cookie hash!\n" );
          retval = RETVAL_PARAMS;
          goto cleanup;
@@ -867,7 +848,7 @@ int cchat_route_chat(
          "</form>\n"
          "</div>\n",
          bdata( session ) );
-      bcgi_check_bstr_err( page.text );
+      cchat_check_bstr_err( err_msg, RETVAL_ALLOC, page.text );
    }
 
    retval = webutil_show_page( &(op->req), q, p, &page );
@@ -924,16 +905,15 @@ int cchat_route_root(
    struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
+   const struct tagbstring cs_login = bsStatic( "/login" );
+   const struct tagbstring cs_chat = bsStatic( "/chat" );
 
-   FCGX_FPrintF( op->req.out, "Status: 303 See Other\r\n" );
    if( 0 > auth_user_id ) {
       /* Invalid user; redirect to login. */
-      FCGX_FPrintF( op->req.out, "Location: /login\r\n" );
+      webutil_redirect( &(op->req), &cs_login, 0 );
    } else {
-      FCGX_FPrintF( op->req.out, "Location: /chat\r\n" );
+      webutil_redirect( &(op->req), &cs_chat, 0 );
    }
-   FCGX_FPrintF( op->req.out, "Cache-Control: no-cache\r\n" );
-   FCGX_FPrintF( op->req.out, "\r\n" );
 
    return retval;
 }
@@ -980,6 +960,7 @@ int cchat_handle_req( struct CCHAT_OP_DATA* op ) {
    bstring post_buf = NULL;
    bstring session = NULL;
    bstring remote_host = NULL;
+   bstring err_msg = NULL;
    size_t post_buf_sz = 0;
    struct bstrList* req_query_list = NULL;
    struct bstrList* post_buf_list = NULL;
@@ -999,23 +980,19 @@ int cchat_handle_req( struct CCHAT_OP_DATA* op ) {
 
    /* Figure out our request method and consequent action. */
    req_method = bfromcstr( FCGX_GetParam( "REQUEST_METHOD", op->req.envp ) );
-   bcgi_check_null( req_method );
+   cchat_check_null( err_msg, RETVAL_ALLOC, req_method );
 
    req_uri_raw = bfromcstr( FCGX_GetParam( "REQUEST_URI", op->req.envp ) );
-   bcgi_check_null( req_uri_raw );
+   cchat_check_null( err_msg, RETVAL_ALLOC, req_uri_raw );
 
    if( BSTR_ERR != bstrchr( req_uri_raw, '?' ) ) {
       retval = btrunc( req_uri_raw, bstrchr( req_uri_raw, '?' ) );
-      bcgi_check_bstr_err( req_uri_raw );
+      cchat_check_bstr_err( err_msg, RETVAL_ALLOC, req_uri_raw );
    }
 
    /* Get query string and split into list. */
    req_query = bfromcstr( FCGX_GetParam( "QUERY_STRING", op->req.envp ) );
-   if( NULL == req_query ) {
-      dbglog_error( "invalid request query string!\n" );
-      retval = RETVAL_PARAMS;
-      goto cleanup;
-   }
+   cchat_check_null( err_msg, RETVAL_ALLOC, req_query );
 
    req_query_list = bsplit( req_query, '&' );
 
@@ -1036,30 +1013,20 @@ int cchat_handle_req( struct CCHAT_OP_DATA* op ) {
       /* Allocate buffer to hold POST data. */
       post_buf_sz = atoi( FCGX_GetParam( "CONTENT_LENGTH", op->req.envp ) );
       post_buf = bfromcstralloc( post_buf_sz + 1, "" );
-      if( NULL == post_buf || NULL == bdata( post_buf ) ) {
-         dbglog_error( "could not allocate POST buffer!\n" );
-         retval = RETVAL_ALLOC;
-         goto cleanup;
-      }
+      cchat_check_null( err_msg, RETVAL_ALLOC, post_buf );
+      cchat_check_null( err_msg, RETVAL_ALLOC, post_buf->data );
       FCGX_GetStr( bdata( post_buf ), post_buf_sz, op->req.in );
       post_buf->slen = post_buf_sz;
       post_buf->data[post_buf_sz] = '\0';
 
       /* Validate post_buf size. */
-      if( post_buf->slen >= post_buf->mlen ) {
-         dbglog_error( "invalid POST buffer size! (s: %d, m: %d)\n",
-            post_buf->slen, post_buf->mlen );
-         retval = RETVAL_ALLOC;
-         goto cleanup;
-      }
+      cchat_check_true( post_buf->slen < post_buf->mlen, err_msg,
+         "invalid POST buffer size! (s: %d, m: %d)",
+         post_buf->slen, post_buf->mlen );
 
       /* Split post_buf into a key/value array. */
       post_buf_list = bsplit( post_buf, '&' );
-      if( NULL == post_buf_list ) {
-         dbglog_error( "could not split POST buffer!\n" );
-         retval = RETVAL_ALLOC;
-         goto cleanup;
-      }
+      cchat_check_null( err_msg, RETVAL_ALLOC, post_buf_list );
    }
 
    /* Determine if a valid route was provided using LUTs above. */
@@ -1071,11 +1038,12 @@ int cchat_handle_req( struct CCHAT_OP_DATA* op ) {
       i++;
    }
 
-   if(
-      0 != blength( &(gc_cchat_route_paths[i]) ) &&
-      0 == bstrcmp( &(gc_cchat_route_methods[i]), req_method )
-   ) {
+   if( 0 != blength( &(gc_cchat_route_paths[i]) ) ) {
       dbglog_debug( 1, "found root for URI: %s\n", bdata( req_uri_raw ) );
+
+      cchat_check_true( !bstrcmp( &(gc_cchat_route_methods[i]), req_method ),
+         err_msg, "Invalid HTTP method!" );
+
       /* A valid route was found! */
       retval = gc_cchat_route_cbs[i](
          op, auth_user_id,
@@ -1083,7 +1051,7 @@ int cchat_handle_req( struct CCHAT_OP_DATA* op ) {
    } else {
       dbglog_debug(
          1, "did not find root for URI: %s\n", bdata( req_uri_raw ) );
-      FCGX_FPrintF( op->req.out, "Status: 404 Bad Request\r\n\r\n" );
+      webutil_not_found( &(op->req) );
    }
 
 cleanup:
@@ -1106,6 +1074,7 @@ cleanup:
    bcgi_cleanup_bstr( req_query, likely );
    bcgi_cleanup_bstr( req_method, likely );
    bcgi_cleanup_bstr( req_uri_raw, likely );
+   bcgi_cleanup_bstr( err_msg, unlikely );
  
    return retval;
 }

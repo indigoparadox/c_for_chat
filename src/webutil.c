@@ -280,10 +280,35 @@ cleanup:
 int webutil_redirect( FCGX_Request* req, const_bstring url, uint8_t flags ) {
    int retval = 0;
 
-   FCGX_FPrintF( req->out, "Status: 303 See Other\r\n" );
+   FCGX_FPrintF( req->out, "Status: 302 Moved Temporarily\r\n" );
    FCGX_FPrintF( req->out, "Location: %s\r\n", bdata( url ) );
    FCGX_FPrintF( req->out, "Cache-Control: no-cache\r\n" );
    FCGX_FPrintF( req->out, "\r\n" ); 
+
+   return retval;
+}
+
+int webutil_server_error( FCGX_Request *req, bstring msg ) {
+   int retval = 0;
+
+   FCGX_FPrintF( req->out, "Status: 500 Internal Server Error\r\n" );
+   FCGX_FPrintF( req->out, "\r\n" ); 
+
+   FCGX_FPrintF( req->out, "<h1>500: Internal Server Error</h1>" ); 
+   if( NULL != msg ) {
+      FCGX_FPrintF( req->out, "<p>Message: %s</p>", bdata( msg ) ); 
+   }
+
+   return retval;
+}
+
+int webutil_not_found( FCGX_Request *req ) {
+   int retval = 0;
+
+   FCGX_FPrintF( req->out, "Status: 404 Not Found\r\n" );
+   FCGX_FPrintF( req->out, "\r\n" ); 
+
+   FCGX_FPrintF( req->out, "<h1>404 Not Found</h1>" ); 
 
    return retval;
 }

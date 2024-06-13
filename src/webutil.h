@@ -32,5 +32,9 @@ int webutil_get_cookies( struct bstrList** out_p, struct CCHAT_OP_DATA* op );
 
 int webutil_redirect( FCGX_Request* req, const_bstring url, uint8_t flags );
 
+int webutil_server_error( FCGX_Request *req, bstring msg );
+
+int webutil_not_found( FCGX_Request *req );
+
 #endif /* !WEBUTIL_H */
 
