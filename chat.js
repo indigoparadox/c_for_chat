@@ -9,6 +9,7 @@ $(document).ready( function() {
 
    $('#send').click( function( e ) {
       /* Send the text to the server as a chat and clear the textbox. */
+      /* TODO: Insert destination. */
       sock.send( "PRIVMSG : " + $('#chat').val() );
       $('#chat').val( '' );
       return false;

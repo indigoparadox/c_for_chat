@@ -631,10 +631,16 @@ int cchat_route_send(
    /* There is POST data, so try to decode it. */
    cchat_decode_field( NULL, p, chat );
 
+   /*
    retval = chatdb_send_message( op, auth_user_id, chat_decode, &err_msg );
    if( retval ) {
       goto cleanup;
    }
+   */
+
+   /* TODO: Insert destination. */
+   binsertStatic( chat, 0, "PRIVMSG : ", '\0' );
+   rtproto_command( op, auth_user_id, chat );
 
 cleanup:
 

@@ -751,7 +751,7 @@ int chatdb_iter_messages(
       "select m.msg_id, m.msg_type, u.user_name, m.room_or_user_to_id, "
          "m.msg_text, strftime('%s', m.msg_time) from messages m "
          "inner join users u on u.user_id = m.user_from_id "
-         "order by m.msg_time desc limit 100",
+         "order by m.msg_time desc limit 10",
       chatdb_dbcb_messages, &arg_struct, &err_msg );
    pthread_mutex_unlock( &(op->db_mutex) );
    if( SQLITE_OK != retval ) {
