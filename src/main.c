@@ -285,7 +285,7 @@ int main( int argc, char* argv[] ) {
    bstring log_path = NULL;
    bstring server_listen = NULL;
    struct lws_context_creation_info lws_info;
-   pthread_t sock_thd = -1;
+   pthread_t sock_thd;
 
    g_op = calloc( sizeof( struct CCHAT_OP_DATA ), 1 );
    bcgi_check_null( g_op );
