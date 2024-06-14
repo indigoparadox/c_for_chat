@@ -4,7 +4,7 @@
 #include <stdlib.h> /* for atoi() */
 
 typedef int (*cchat_route_cb_t)(
-   struct CCHAT_OP_DATA* op, int auth_user_id,
+   struct CCHAT_OP_DATA* op,
    struct bstrList* q, struct bstrList* p, struct bstrList* c );
 
 extern bstring g_recaptcha_site_key;
@@ -19,6 +19,7 @@ extern bstring g_recaptcha_secret_key;
    f( "/send", cchat_route_send, "POST" ) \
    f( "/chat", cchat_route_chat, "GET" ) \
    f( "/style.css", cchat_route_style_css, "GET" ) \
+   f( "/strftime.js", cchat_route_strftime_js, "GET" ) \
    f( "/chat.js", cchat_route_chat_js, "GET" ) \
    f( "/alert.mp3", cchat_route_alert_mp3, "GET" ) \
    f( "/", cchat_route_root, "GET" ) \
@@ -73,7 +74,7 @@ extern bstring g_recaptcha_secret_key;
       def, list, field_name, field_name ## _decode, field_name );
 
 int cchat_route_logout(
-   struct CCHAT_OP_DATA* op, int auth_user_id,
+   struct CCHAT_OP_DATA* op,
    struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
@@ -97,8 +98,8 @@ int cchat_route_logout(
 }
 
 static int cchat_profile_form(
-   struct WEBUTIL_PAGE* page, bstring user_name, bstring email, bstring session,
-   int session_timeout, int flags, bstring* err_msg_p
+   struct WEBUTIL_PAGE* page, bstring session,
+   struct CHATDB_USER* user, bstring* err_msg_p
 ) {
    int retval = 0;
 
@@ -128,11 +129,22 @@ static int cchat_profile_form(
                "name=\"session_timeout\" value=\"%d\" />"
                "</div>\n"
          "<div class=\"profile-field\">"
+            "<label for=\"time_fmt\">Time format: </label>"
+            "<input type=\"text\" id=\"time_fmt\" "
+               "name=\"time_fmt\" value=\"%s\" />"
+               "</div>\n"
+         "<div class=\"profile-field\">"
+            "<label for=\"timezone\">Timezone: </label>"
+            "<input type=\"text\" id=\"timezone\" "
+               "name=\"timezone\" value=\"%d\" />"
+               "</div>\n"
+         "<div class=\"profile-field\">"
             "<label for=\"flags_ws\">Use websockets: </label>"
             "<input type=\"checkbox\" id=\"flags_ws\" "
                "name=\"flags_ws\"%s /></div>\n",
-      bdata( user_name ), bdata( email ), session_timeout,
-      (CHATDB_USER_FLAG_WS == (CHATDB_USER_FLAG_WS & flags)) ?
+      bdata( user->user_name ), bdata( user->email ), user->session_timeout,
+      bdata( user->time_fmt ), user->timezone,
+      (CHATDB_USER_FLAG_WS == (CHATDB_USER_FLAG_WS & user->flags)) ?
          " checked=\"checked\"" : ""
    );
 
@@ -195,9 +207,7 @@ int cchat_profile_user_cb(
    }
    dbglog_debug( 1, "profile session: %s\n", bdata( session ) );
 
-   retval = cchat_profile_form(
-      page, user->user_name, user->email, session, user->session_timeout,
-      user->flags, &err_msg );
+   retval = cchat_profile_form( page, session, user, &err_msg );
    if( retval ) {
       webutil_server_error( &(op->req), err_msg );
       dbglog_debug(
@@ -224,7 +234,7 @@ cleanup:
 }
 
 int cchat_route_profile(
-   struct CCHAT_OP_DATA* op, int auth_user_id,
+   struct CCHAT_OP_DATA* op,
    struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
@@ -241,17 +251,16 @@ int cchat_route_profile(
    page.text = bfromcstr( "" );
    cchat_check_null( err_msg, RETVAL_ALLOC, page.text );
 
-   if( 0 <= auth_user_id ) {
+   if( NULL != op->auth_user ) {
       /* Edit an existing user. */
-      user.user_id = auth_user_id;
+      user.user_id = op->auth_user->user_id;
       retval = chatdb_iter_users(
          &page, op, NULL, &user, cchat_profile_user_cb, NULL );
       if( retval ) {
          goto cleanup;
       }
    } else {
-      retval = cchat_profile_form(
-         &page, &empty_string, &empty_string, NULL, 3600, 0, &err_msg );
+      retval = cchat_profile_form( &page, NULL, NULL, &err_msg );
       if( retval ) {
          webutil_server_error( &(op->req), err_msg );
          dbglog_debug(
@@ -274,7 +283,7 @@ cleanup:
 }
 
 int cchat_route_user(
-   struct CCHAT_OP_DATA* op, int auth_user_id,
+   struct CCHAT_OP_DATA* op,
    struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
@@ -304,7 +313,7 @@ int cchat_route_user(
 
    cchat_check_null( err_msg, RETVAL_ALLOC, p );
 
-   if( 0 <= auth_user_id ) {
+   if( NULL != op->auth_user ) {
       /* TODO: Better CSRF. */
 
       /* See if a valid session exists (don't urldecode!). */
@@ -329,9 +338,9 @@ int cchat_route_user(
       cchat_check_true( !retval, err_msg, "Invalid ReCAPTCHA response!" );
    }
 
-   if( 0 <= auth_user_id ) {
+   if( NULL != op->auth_user ) {
       /* We're editing an existing user, so grab that user. */
-      user_obj.user_id = auth_user_id;
+      user_obj.user_id = op->auth_user->user_id;
       retval = chatdb_iter_users( NULL, op, NULL, &user_obj, NULL, NULL );
       cchat_check_true( user_obj.user_name, err_msg, "Invalid user!" );
    }
@@ -370,7 +379,7 @@ cleanup:
    /* Redirect to route. */
    if( NULL != err_msg ) {
       redirect_url = bformat( "/profile?error=%s", bdata( err_msg ) );
-   } else if( 0 <= auth_user_id ) {
+   } else if( NULL != op->auth_user ) {
       redirect_url = bfromcstr( "/profile" );
    } else {
       redirect_url = bfromcstr( "/login" );
@@ -403,7 +412,7 @@ cleanup:
 }
 
 int cchat_route_login(
-   struct CCHAT_OP_DATA* op, int auth_user_id,
+   struct CCHAT_OP_DATA* op,
    struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
@@ -493,7 +502,7 @@ cleanup:
 }
 
 int cchat_route_auth(
-   struct CCHAT_OP_DATA* op, int auth_user_id,
+   struct CCHAT_OP_DATA* op,
    struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
@@ -601,7 +610,7 @@ cleanup:
 }
 
 int cchat_route_send(
-   struct CCHAT_OP_DATA* op, int auth_user_id,
+   struct CCHAT_OP_DATA* op,
    struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
@@ -616,6 +625,11 @@ int cchat_route_send(
    dbglog_debug( 1, "route: send\n" );
 
    cchat_check_null( err_msg, RETVAL_ALLOC, p );
+
+   if( NULL != op->auth_user ) {
+      webutil_server_error( &(op->req), NULL );     
+      goto cleanup;
+   }
 
    /* See if a valid session exists (don't urldecode!). */
    retval = bcgi_query_key( c, "session", &session );
@@ -640,7 +654,7 @@ int cchat_route_send(
 
    /* TODO: Insert destination. */
    binsertStatic( chat, 0, "PRIVMSG : ", '\0' );
-   rtproto_command( op, auth_user_id, chat );
+   rtproto_command( op, op->auth_user->user_id, chat );
 
 cleanup:
 
@@ -667,20 +681,22 @@ cleanup:
 }
 
 int cchat_print_msg_cb(
-   struct WEBUTIL_PAGE* page,
-   int msg_id, int msg_type, bstring from, int to, bstring text, time_t msg_time
+   struct WEBUTIL_PAGE* page, struct CCHAT_OP_DATA* op,
+   struct CHATDB_MESSAGE* message, bstring user_name
 ) {
    int retval = 0;
    bstring text_escaped = NULL;
    bstring msg_time_f = NULL;
 
    /* Sanitize HTML. */
-   retval = bcgi_html_escape( text, &text_escaped );
+   retval = bcgi_html_escape( message->msg_text, &text_escaped );
    if( retval ) {
       goto cleanup;
    }
 
-   retval = webutil_format_time( &msg_time_f, msg_time );
+   retval = webutil_format_time(
+      &msg_time_f, op->auth_user->time_fmt, op->auth_user->timezone,
+      message->msg_time );
    if( retval ) {
       goto cleanup;
    }
@@ -692,7 +708,8 @@ int cchat_print_msg_cb(
          "<td class=\"chat-msg\">%s</td>"
          "<td class=\"chat-time\">%s</td>"
       "</tr>\n",
-      bdata( from ), bdata( text_escaped ), bdata( msg_time_f ) );
+      bdata( user_name ), bdata( text_escaped ),
+      bdata( msg_time_f ) );
    cchat_check_bstr_err( err_msg, RETVAL_ALLOC, page->text );
 
 cleanup:
@@ -704,7 +721,7 @@ cleanup:
 }
 
 int cchat_route_chat(
-   struct CCHAT_OP_DATA* op, int auth_user_id,
+   struct CCHAT_OP_DATA* op,
    struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
@@ -713,7 +730,7 @@ int cchat_route_chat(
    bstring session = NULL;
    bstring mini = NULL;
    struct WEBUTIL_PAGE page = { 0, 0, 0 };
-   struct CHATDB_USER user;
+   struct CHATDB_MESSAGE message;
    const struct tagbstring cs_login_err_session =
       bsStatic( "/login?error=Invalid session cookie!" );
    const struct tagbstring cs_login_err_user =
@@ -722,31 +739,23 @@ int cchat_route_chat(
    page.title = &page_title;
    page.flags = 0;
 
-   memset( &user, '\0', sizeof( struct CHATDB_USER ) );
+   memset( &message, '\0', sizeof( struct CHATDB_MESSAGE ) );
 
-   if( 0 > auth_user_id ) {
+   if( NULL == op->auth_user ) {
       dbglog_debug( 3, "/chat access by unauthorized user!\n" );
       webutil_redirect( &(op->req), &cs_login_err_session, 0 );
-      goto cleanup;
-   }
-
-   /* Grab user properties for preferences. */
-   memset( &user, '\0', sizeof( struct CHATDB_USER ) );
-   user.user_id = auth_user_id;
-   retval = chatdb_iter_users( NULL, op, NULL, &user, NULL, NULL );
-   if( retval ) {
-      dbglog_error( "error fetching user!\n" );
-      webutil_redirect( &(op->req), &cs_login_err_user, 0 );
       goto cleanup;
    }
 
    page.text = bfromcstr( "" );
    cchat_check_null( err_msg, RETVAL_ALLOC, page.text );
 
-   if( CHATDB_USER_FLAG_WS == (CHATDB_USER_FLAG_WS & user.flags) ) {
+   if( CHATDB_USER_FLAG_WS == (CHATDB_USER_FLAG_WS & op->auth_user->flags) ) {
       /* Add refresher/convenience script. */
       retval = webutil_add_script( &page,
          "<script src=\"https://code.jquery.com/jquery-2.2.4.min.js\" integrity=\"sha256-BbhdlvQf/xTY9gja0Dq3HiwQF8LaCRTXxZKRutelT44=\" crossorigin=\"anonymous\"></script>\n" );
+      retval = webutil_add_script( &page,
+         "<script type=\"text/javascript\" src=\"strftime.js\"></script>\n" );
       retval = webutil_add_script( &page,
          "<script type=\"text/javascript\" src=\"chat.js\"></script>\n" );
    }
@@ -759,7 +768,7 @@ int cchat_route_chat(
    }
 
    if(
-      CHATDB_USER_FLAG_WS != (CHATDB_USER_FLAG_WS & user.flags) &&
+      CHATDB_USER_FLAG_WS != (CHATDB_USER_FLAG_WS & op->auth_user->flags) &&
       biseqcaselessStatic( mini, "nav" )
    ) {
       dbglog_debug( 1, "showing nav...\n" );
@@ -767,7 +776,7 @@ int cchat_route_chat(
       /* Only show built-in page nav. */
 
    } else if(
-      CHATDB_USER_FLAG_WS != (CHATDB_USER_FLAG_WS & user.flags) &&
+      CHATDB_USER_FLAG_WS != (CHATDB_USER_FLAG_WS & op->auth_user->flags) &&
       biseqcaselessStatic( mini, "top" )
    ) {
       dbglog_debug( 1, "showing top frame...\n" );
@@ -781,7 +790,7 @@ int cchat_route_chat(
          "<meta http-equiv=\"refresh\" content=\"2\" />\n" );
    
    } else if( 
-      CHATDB_USER_FLAG_WS != (CHATDB_USER_FLAG_WS & user.flags) &&
+      CHATDB_USER_FLAG_WS != (CHATDB_USER_FLAG_WS & op->auth_user->flags) &&
       biseqcaselessStatic( mini, "bottom" )
    ) {
       dbglog_debug( 1, "showing bottom frame...\n" );
@@ -791,7 +800,7 @@ int cchat_route_chat(
       page.flags |= WEBUTIL_PAGE_FLAG_NONAV;
 
    } else if(
-      CHATDB_USER_FLAG_WS != (CHATDB_USER_FLAG_WS & user.flags)
+      CHATDB_USER_FLAG_WS != (CHATDB_USER_FLAG_WS & op->auth_user->flags)
    ) {
       dbglog_debug( 1, "showing frameset...\n" );
 
@@ -811,14 +820,14 @@ int cchat_route_chat(
 
    /* Show messages if we have websockets or are in the message frame. */
    if(
-      CHATDB_USER_FLAG_WS == (CHATDB_USER_FLAG_WS & user.flags) ||
+      CHATDB_USER_FLAG_WS == (CHATDB_USER_FLAG_WS & op->auth_user->flags) ||
       biseqcaselessStatic( mini, "top" )
    ) {
       retval = bcatcstr( page.text, "<table class=\"chat-messages\">\n" );
       cchat_check_bstr_err( err_msg, RETVAL_ALLOC, page.text );
 
       retval = chatdb_iter_messages(
-         &page, op, 0, 0, cchat_print_msg_cb, &err_msg );
+         &page, op, &message, cchat_print_msg_cb, &err_msg );
       if( retval ) {
          /* TODO: 500 error? */
          dbglog_error( "error iteraing messages!\n" );
@@ -830,7 +839,7 @@ int cchat_route_chat(
    }
 
    if(
-      CHATDB_USER_FLAG_WS == (CHATDB_USER_FLAG_WS & user.flags) ||
+      CHATDB_USER_FLAG_WS == (CHATDB_USER_FLAG_WS & op->auth_user->flags) ||
       biseqcaselessStatic( mini, "bottom" )
    ) {
       /* Grab the session for CSRF use. */
@@ -861,7 +870,7 @@ int cchat_route_chat(
 
 cleanup:
 
-   chatdb_free_user( &user );
+   chatdb_free_message( &message );
 
    bcgi_cleanup_bstr( page.scripts, likely );
    bcgi_cleanup_bstr( mini, likely );
@@ -873,7 +882,7 @@ cleanup:
 }
 
 int cchat_route_style_css(
-   struct CCHAT_OP_DATA* op, int auth_user_id,
+   struct CCHAT_OP_DATA* op,
    struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
@@ -883,8 +892,19 @@ int cchat_route_style_css(
    return retval;
 }
 
+int cchat_route_strftime_js(
+   struct CCHAT_OP_DATA* op,
+   struct bstrList* q, struct bstrList* p, struct bstrList* c
+) {
+   int retval = 0;
+
+   retval = webutil_dump_file( &(op->req), "strftime.js", "text/javascript" );
+
+   return retval;
+}
+
 int cchat_route_chat_js(
-   struct CCHAT_OP_DATA* op, int auth_user_id,
+   struct CCHAT_OP_DATA* op,
    struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
@@ -895,7 +915,7 @@ int cchat_route_chat_js(
 }
 
 int cchat_route_alert_mp3(
-   struct CCHAT_OP_DATA* op, int auth_user_id,
+   struct CCHAT_OP_DATA* op,
    struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
@@ -907,14 +927,14 @@ int cchat_route_alert_mp3(
 
 
 int cchat_route_root(
-   struct CCHAT_OP_DATA* op, int auth_user_id,
+   struct CCHAT_OP_DATA* op,
    struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
    const struct tagbstring cs_login = bsStatic( "/login" );
    const struct tagbstring cs_chat = bsStatic( "/chat" );
 
-   if( 0 > auth_user_id ) {
+   if( NULL == op->auth_user ) {
       /* Invalid user; redirect to login. */
       webutil_redirect( &(op->req), &cs_login, 0 );
    } else {
@@ -971,7 +991,8 @@ int cchat_handle_req( struct CCHAT_OP_DATA* op ) {
    struct bstrList* req_query_list = NULL;
    struct bstrList* post_buf_list = NULL;
    struct bstrList* req_cookie_list = NULL;
-   int auth_user_id = -1;
+   const struct tagbstring cs_login_err_user =
+      bsStatic( "/login?error=Invalid user!" );
 
    if( 0 >= g_dbglog_level ) {
       while( NULL != op->req.envp[i] ) {
@@ -1008,9 +1029,24 @@ int cchat_handle_req( struct CCHAT_OP_DATA* op ) {
       retval = bcgi_query_key( req_cookie_list, "session", &session );
       if( !retval && NULL != session ) {
          dbglog_debug( 2, "session cookie found: %s\n", bdata( session ) );
+         op->auth_user = calloc( sizeof( struct CHATDB_USER ), 1 );
+         cchat_check_null( err_msg, RETVAL_ALLOC, op->auth_user );
          chatdb_iter_sessions(
-            NULL, &auth_user_id, op, session,
+            NULL, &(op->auth_user->user_id), op, session,
             remote_host, cchat_auth_session_cb, NULL );
+         /* TODO: Clean up this indentation! */
+         if( 0 < op->auth_user->user_id ) {
+            retval = chatdb_iter_users(
+               NULL, op, NULL, op->auth_user, NULL, NULL );
+            if( retval ) {
+               dbglog_error( "error fetching user!\n" );
+               webutil_redirect( &(op->req), &cs_login_err_user, 0 );
+               goto cleanup;
+            }
+         } else {
+            free( op->auth_user );
+            op->auth_user = NULL;
+         }
       }
    }
 
@@ -1052,7 +1088,7 @@ int cchat_handle_req( struct CCHAT_OP_DATA* op ) {
 
       /* A valid route was found! */
       retval = gc_cchat_route_cbs[i](
-         op, auth_user_id,
+         op,
          req_query_list, post_buf_list, req_cookie_list );
    } else {
       dbglog_debug(
@@ -1081,6 +1117,12 @@ cleanup:
    bcgi_cleanup_bstr( req_method, likely );
    bcgi_cleanup_bstr( req_uri_raw, likely );
    bcgi_cleanup_bstr( err_msg, unlikely );
+
+   if( NULL != op->auth_user ) {
+      chatdb_free_user( op->auth_user );
+      free( op->auth_user );
+      op->auth_user = NULL;
+   }
  
    return retval;
 }

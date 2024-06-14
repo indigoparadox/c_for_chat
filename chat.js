@@ -31,7 +31,7 @@ $(document).ready( function() {
          $('.chat-messages').prepend( "<tr>" +
                "<td class=\"chat-from\">" + m[1] + "</td>" +
                "<td class=\"chat-msg\">" + m[4] + "</td>" +
-               "<td class=\"chat-time\">" + d.toLocaleString() + "</td>" +
+               "<td class=\"chat-time\">" + strftime( '%Y-%m-%d %H:%M', d ) + "</td>" +
             "</tr>" );
       }
    };

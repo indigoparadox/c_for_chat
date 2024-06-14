@@ -26,6 +26,7 @@ struct CCHAT_OP_DATA {
    struct RTPROTO_CLIENT* clients;
    size_t clients_sz_max;
    size_t clients_sz;
+   struct CHATDB_USER* auth_user;
 };
 
 #include "bcgi.h"

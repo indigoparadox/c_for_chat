@@ -15,7 +15,8 @@ struct WEBUTIL_PAGE {
    bstring scripts;
 };
 
-int webutil_format_time( bstring* out_p, time_t epoch );
+int webutil_format_time(
+   bstring* out_p, bstring time_fmt, int timezone, time_t epoch );
 
 int webutil_dump_file(
    FCGX_Request* req, const char* filename, const char* mimetype );
@@ -35,6 +36,12 @@ int webutil_redirect( FCGX_Request* req, const_bstring url, uint8_t flags );
 int webutil_server_error( FCGX_Request *req, bstring msg );
 
 int webutil_not_found( FCGX_Request *req );
+
+int webutil_form_field_bstring( bstring html, const char* name, bstring* val );
+
+int webutil_form_field_int( bstring html, const char* name, int* val );
+
+int webutil_form_field_time_t( bstring html, const char* name, time_t* val );
 
 #endif /* !WEBUTIL_H */
 

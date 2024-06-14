@@ -18,13 +18,13 @@
       goto cleanup; \
    }
 
-#define CHATDB_USER_TABLE_DB_FIELDS( idx, u, field, c_type, db_type ) \
+#define CHATDB_TABLE_FIELDS( v, idx, u, field, c_type, db_type ) \
    #field "*" #u "$" db_type "|"
 
-#define CHATDB_USER_TABLE_PREPARE( idx, u, field, c_type, db_type ) \
-   dbglog_debug( 1, "binding user->" #field " as param %d...\n", i ); \
+#define CHATDB_TABLE_PREPARE( v, idx, u, field, c_type, db_type ) \
+   dbglog_debug( 1, "binding " #v "->" #field " as param %d...\n", i ); \
    assert( 0 != user->field || NULL == strstr( db_type, "not null" ) ); \
-   retval = _chatdb_bind_ ## c_type ( stmt, &i, user->field ); \
+   retval = _chatdb_bind_ ## c_type ( stmt, &i, v->field ); \
    if( retval ) { \
       dbglog_error( "error binding field: " #field "!\n" ); \
       assert( NULL == *err_msg_p ); \
@@ -32,6 +32,19 @@
       pthread_mutex_unlock( &(op->db_mutex) ); \
       goto cleanup; \
    } \
+
+/**
+ * \brief Define the inserted/updated fields for a bind or insert.
+ */
+#define CHATDB_TABLE_PREPARE_IDX( v, idx, u, field, c_type, db_type ) \
+   if( 0 < u ) { \
+      CHATDB_TABLE_PREPARE( v, idx, u, field, c_type, db_type ); \
+   }
+
+#define CHATDB_TABLE_PREPARE_PK( v, idx, u, field, c_type, db_type ) \
+   if( NULL != strstr( db_type, "primary key" ) ) { \
+      CHATDB_TABLE_PREPARE( v, idx, u, field, c_type, db_type ); \
+   }
 
 #define _chatdb_alter_table( version, db, mutex, alter_stmt ) \
       pthread_mutex_lock( mutex ); \
@@ -53,7 +66,10 @@
       dbglog_debug( 9, "updated schema version: %d\n", schema_ver.integer );
 
 const static struct tagbstring _gc_chatdb_fields_users = 
-   bsStatic( CHATDB_USER_TABLE( CHATDB_USER_TABLE_DB_FIELDS ) );
+   bsStatic( CHATDB_USER_TABLE( CHATDB_TABLE_FIELDS ) );
+
+const static struct tagbstring _gc_chatdb_fields_messages =
+   bsStatic( CHATDB_MESSAGE_TABLE( CHATDB_TABLE_FIELDS ) );
 
 struct CHATDB_ARG {
    chatdb_iter_msg_cb_t cb_msg;
@@ -64,6 +80,7 @@ struct CHATDB_ARG {
    struct CCHAT_OP_DATA* op;
    int* user_id_out_p;
    struct CHATDB_USER* user;
+   struct CHATDB_MESSAGE* message;
 };
 
 static int _chatdb_build_split_fields(
@@ -99,7 +116,10 @@ static int _chatdb_build_create_table(
    int sep_1_pos = 0;
    int sep_2_pos = 0;
 
-   assert( NULL == *query_p );
+   if( NULL == *query_p ) {
+      *query_p = bfromcstr( "" );
+      bcgi_check_null( *query_p );
+   }
 
    retval = _chatdb_build_split_fields( &field_list, fields );
    if( retval ) {
@@ -147,9 +167,9 @@ static int _chatdb_build_create_table(
    list_str = bjoinStatic( key_list, ", " );
    bcgi_check_null( list_str );
 
-   *query_p = bformat( "create table if not exists %s( %s );",
+   retval = bassignformat( *query_p, "create table if not exists %s( %s );",
       table_name, bdata( list_str ) );
-   bcgi_check_null( *query_p );
+   bcgi_check_bstr_err( *query_p );
 
 cleanup:
 
@@ -355,6 +375,50 @@ cleanup:
    return retval;
 }
 
+static
+int chatdb_assign_time_t( time_t* out_p, const char* in ) {
+   int retval = 0;
+   struct tm ts;
+   char buffer[101];
+
+   memset( buffer, '\0', 101 );
+
+   strptime( in, "%Y-%m-%d%t%H:%M:%S", &ts );
+   strftime( buffer, 100, "%s", &ts );
+   /* TODO: Don't use atoi() for this! */
+   *out_p = atol( buffer );
+
+   return retval;
+}
+
+static
+int chatdb_assign_int( int* out_p, const char* in ) {
+   int retval = 0;
+
+   assert( NULL != in );
+
+   *out_p = atoi( in );
+
+   return retval;
+}
+
+static
+int chatdb_assign_bstring( bstring* out_p, const char* in ) {
+   int retval = 0;
+
+   if( NULL != *out_p ) {
+      retval = bassigncstr( *out_p, in );
+      bcgi_check_bstr_err( *out_p );
+   } else {
+      *out_p = bfromcstr( in );
+      bcgi_check_null( *out_p );
+   }
+
+cleanup:
+
+   return retval;
+}
+
 int chatdb_init( bstring path, struct CCHAT_OP_DATA* op ) {
    int retval = 0;
    char* err_msg = NULL;
@@ -380,15 +444,13 @@ int chatdb_init( bstring path, struct CCHAT_OP_DATA* op ) {
    */
 
    /* Create message table if it doesn't exist. */
+   retval = _chatdb_build_create_table(
+      &query, &_gc_chatdb_fields_messages, "messages" );
+   if( retval ) {
+      goto cleanup;
+   }
    pthread_mutex_lock( &(op->db_mutex) );
-   retval = sqlite3_exec( op->db,
-      "create table if not exists messages( "
-         "msg_id integer primary key,"
-         "msg_type integer not null,"
-         "user_from_id integer not null,"
-         "room_or_user_to_id integer not null,"
-         "msg_text text,"
-         "msg_time datetime default current_timestamp );", NULL, 0, &err_msg );
+   retval = sqlite3_exec( op->db, bdata( query ), NULL, 0, &err_msg );
    pthread_mutex_unlock( &(op->db_mutex) );
    if( SQLITE_OK != retval ) {
       dbglog_error( "could not create database message table: %s\n", err_msg );
@@ -470,6 +532,15 @@ int chatdb_init( bstring path, struct CCHAT_OP_DATA* op ) {
       /* Bring up to version one. */
       _chatdb_alter_table( 2, op->db, &(op->db_mutex),
          "alter table users add column flags integer default 0" );
+      /* Fall through. */
+
+   case 2:
+      _chatdb_alter_table( 3, op->db, &(op->db_mutex),
+         "alter table users add column time_fmt text default '%Y-%m-%d %H:%M %Zs'" );
+
+   case 3:
+      _chatdb_alter_table( 4, op->db, &(op->db_mutex),
+         "alter table users add column timezone integer default 0" );
       /* Fall through. */
 
    default:
@@ -568,13 +639,6 @@ int chatdb_add_user(
       }
    }
 
-   /* This is used to define the inserted/updated fields for a bind or insert.
-    */
-   #define CHATDB_USER_TABLE_PREPARE_IDX( idx, u, field, c_type, db_type ) \
-      if( 0 < u ) { \
-         CHATDB_USER_TABLE_PREPARE( idx, u, field, c_type, db_type ); \
-      }
-
    pthread_mutex_lock( &(op->db_mutex) );
 
    if( 0 < user->user_id ) {
@@ -595,16 +659,11 @@ int chatdb_add_user(
 
       /* Bind the fields with non-zero (/non-1) bind indexes. */
       i = 1;
-      CHATDB_USER_TABLE( CHATDB_USER_TABLE_PREPARE_IDX );
+      CHATDB_USER_TABLE( CHATDB_TABLE_PREPARE_IDX );
 
       /* Bind the primary key as criteria. */
 
-      #define CHATDB_USER_TABLE_PREPARE_PK( idx, u, field, c_type, db_type ) \
-         if( NULL != strstr( db_type, "primary key" ) ) { \
-            CHATDB_USER_TABLE_PREPARE( idx, u, field, c_type, db_type ); \
-         }
-
-      CHATDB_USER_TABLE( CHATDB_USER_TABLE_PREPARE_PK );
+      CHATDB_USER_TABLE( CHATDB_TABLE_PREPARE_PK );
 
    } else {
       /* No user ID/new ser; prepare an INSERT statement. */
@@ -624,7 +683,7 @@ int chatdb_add_user(
 
       /* Bind the fields with non-zero (/non-1) bind indexes. */
       i = 1;
-      CHATDB_USER_TABLE( CHATDB_USER_TABLE_PREPARE_IDX );
+      CHATDB_USER_TABLE( CHATDB_TABLE_PREPARE_IDX );
    }
 
    /* Execute the statement. */
@@ -703,53 +762,47 @@ int chatdb_dbcb_messages( void* arg, int argc, char** argv, char **col ) {
    struct CHATDB_ARG* arg_struct = (struct CHATDB_ARG*)arg;
    int retval = 0;
    bstring user_name = NULL;
-   bstring msg_text = NULL;
 
-   if( 6 > argc ) {
+   if( 7 != argc ) {
       retval = 1;
       goto cleanup;
    }
 
-   chatdb_argv( user_name, 2 );
-   chatdb_argv( msg_text, 4 );
+   CHATDB_MESSAGE_TABLE( CHATDB_TABLE_ASSIGN );
+
+   /* Assign the joined user name. */
+   chatdb_assign_bstring( &user_name, argv[6] );
 
    retval = arg_struct->cb_msg(
       arg_struct->page,
-      atoi( argv[0] ), /* msg_id */
-      atoi( argv[1] ), /* msg_type */
-      user_name, /* user_from_id */
-      atoi( argv[3] ), /* room_or_user_to_id */
-      msg_text,
-      atoi( argv[5] ) ); /* msg_time */
+      arg_struct->op,
+      arg_struct->message,
+      user_name );
 
 cleanup:
 
-   if( NULL != msg_text ) {
-      bdestroy( msg_text );
-   }
-
-   if( NULL != user_name ) {
-      bdestroy( user_name );
-   }
+   bcgi_cleanup_bstr( user_name, likely );
 
    return retval;
 }
 
 int chatdb_iter_messages(
    struct WEBUTIL_PAGE* page, struct CCHAT_OP_DATA* op,
-   int msg_type, int dest_id, chatdb_iter_msg_cb_t cb, bstring* err_msg_p
+   struct CHATDB_MESSAGE* message, chatdb_iter_msg_cb_t cb, bstring* err_msg_p
 ) {
    int retval = 0;
    char* err_msg = NULL;
    struct CHATDB_ARG arg_struct;
 
+   arg_struct.op = op;
    arg_struct.cb_msg = cb;
    arg_struct.page = page;
+   arg_struct.message = message;
 
    pthread_mutex_lock( &(op->db_mutex) );
    retval = sqlite3_exec( op->db,
       "select m.msg_id, m.msg_type, u.user_name, m.room_or_user_to_id, "
-         "m.msg_text, strftime('%s', m.msg_time) from messages m "
+         "m.msg_text, m.msg_time, u.user_name from messages m "
          "inner join users u on u.user_id = m.user_from_id "
          "order by m.msg_time desc limit 10",
       chatdb_dbcb_messages, &arg_struct, &err_msg );
@@ -777,64 +830,17 @@ cleanup:
 }
 
 static
-int chatdb_assign_time_t( time_t* out_p, const char* in ) {
-   int retval = 0;
-   struct tm ts;
-   char buffer[101];
-
-   memset( buffer, '\0', 101 );
-
-   strptime( in, "%Y-%m-%d%t%H:%M:%S", &ts );
-   strftime( buffer, 100, "%s", &ts );
-   /* TODO: Don't use atoi() for this! */
-   *out_p = atol( buffer );
-
-   return retval;
-}
-
-static
-int chatdb_assign_int( int* out_p, const char* in ) {
-   int retval = 0;
-
-   assert( NULL != in );
-
-   *out_p = atoi( in );
-
-   return retval;
-}
-
-static
-int chatdb_assign_bstring( bstring* out_p, const char* in ) {
-   int retval = 0;
-
-   if( NULL != *out_p ) {
-      retval = bassigncstr( *out_p, in );
-      bcgi_check_bstr_err( *out_p );
-   } else {
-      *out_p = bfromcstr( in );
-      bcgi_check_null( *out_p );
-   }
-
-cleanup:
-
-   return retval;
-}
-
-static
 int chatdb_dbcb_users( void* arg, int argc, char** argv, char **col ) {
    struct CHATDB_ARG* arg_struct = (struct CHATDB_ARG*)arg;
    int retval = 0;
 
-   if( 8 > argc ) {
+   if( 12 != argc ) {
       dbglog_error( "incorrect number of user fields!\n" );
       retval = 1;
       goto cleanup;
    }
 
-   #define CHATDB_USER_TABLE_ASSIGN( idx, u, field, c_type, db_type ) \
-      chatdb_assign_ ## c_type ( &(arg_struct->user->field), argv[idx] );
-
-   CHATDB_USER_TABLE( CHATDB_USER_TABLE_ASSIGN );
+   CHATDB_USER_TABLE( CHATDB_TABLE_ASSIGN );
 
    if( NULL != arg_struct->cb_user ) {
       retval = arg_struct->cb_user(

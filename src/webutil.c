@@ -6,7 +6,9 @@
 bstring g_recaptcha_site_key = NULL;
 bstring g_recaptcha_secret_key = NULL;
 
-int webutil_format_time( bstring* out_p, time_t epoch ) {
+int webutil_format_time(
+   bstring* out_p, bstring time_fmt, int timezone, time_t epoch
+) {
    int retval = 0;
    struct tm* ts = NULL;
 
@@ -15,8 +17,10 @@ int webutil_format_time( bstring* out_p, time_t epoch ) {
    *out_p = bfromcstralloc( 101, "" );
    bcgi_check_null( *out_p );
 
+   assert( NULL != time_fmt->data );
+
    ts = localtime( &epoch );
-   strftime( (char*)((*out_p)->data), 100, "%Y-%m-%d %H:%M %Z", ts );
+   strftime( (char*)((*out_p)->data), 100, (char*)(time_fmt->data), ts );
 
 cleanup:
 
@@ -309,6 +313,59 @@ int webutil_not_found( FCGX_Request *req ) {
    FCGX_FPrintF( req->out, "\r\n" ); 
 
    FCGX_FPrintF( req->out, "<h1>404 Not Found</h1>" ); 
+
+   return retval;
+}
+
+int webutil_form_field_bstring(
+   bstring html, const char* name, bstring* val
+) {
+   int retval = 0;
+
+   retval = bformata( html,
+      "<div class=\"profile-field\">"
+         "<label for=\"%s\">%s: </label>"
+         "<input type=\"text\" id=\"%s\" name=\"%s\" value=\"%s\" />"
+            "</div>\n",
+      name, name, name, name,
+      NULL != val && NULL != *val ? bdata( *val ) : "" );
+   bcgi_check_bstr_err( html );
+
+cleanup:
+
+   return retval;
+}
+
+int webutil_form_field_int( bstring html, const char* name, int* val ) {
+   int retval = 0;
+
+   retval = bformata( html,
+      "<div class=\"profile-field\">"
+         "<label for=\"%s\">%s: </label>"
+         "<input type=\"text\" id=\"%s\" name=\"%s\" value=\"%d\" />"
+            "</div>\n",
+      name, name, name, name,
+      NULL != val ? *val : 0 );
+   bcgi_check_bstr_err( html );
+
+cleanup:
+
+   return retval;
+}
+
+int webutil_form_field_time_t( bstring html, const char* name, time_t* val ) {
+   int retval = 0;
+
+   retval = bformata( html,
+      "<div class=\"profile-field\">"
+         "<label for=\"%s\">%s: </label>"
+         "<input type=\"text\" id=\"%s\" name=\"%s\" value=\"%d\" />"
+            "</div>\n",
+      name, name, name, name,
+      NULL != val ? *val : 0 );
+   bcgi_check_bstr_err( html );
+
+cleanup:
 
    return retval;
 }

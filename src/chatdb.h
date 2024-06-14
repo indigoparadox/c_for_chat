@@ -12,27 +12,48 @@
 /* Second field is prepared statement index. */
 /* If the second field < 0, this field won't be added to inserts/updates. */
 #define CHATDB_USER_TABLE( f ) \
-   f(  0, -1, user_id,         int,     "integer primary key" ) \
-   f(  1,  1, user_name,       bstring, "text not null unique" ) \
-   f(  2,  2, email,           bstring, "text" ) \
-   f(  3,  3, hash,            bstring, "text not null" ) \
-   f(  4,  4, hash_sz,         int,     "integer not null" ) \
-   f(  5,  5, salt,            bstring, "text not null" ) \
-   f(  6,  6, iters,           int,     "integer not null" ) \
-   f(  7, -1, join_time,       time_t,  "datetime default current_timestamp" ) \
-   f(  8,  7, session_timeout, int,     "integer default 3600" ) \
-   f(  9,  8, flags,           int,     "integer default 0" )
+   f( user,  0, -1, user_id,         int,     "integer primary key" ) \
+   f( user,  1,  1, user_name,       bstring, "text not null unique" ) \
+   f( user,  2,  2, email,           bstring, "text" ) \
+   f( user,  3,  3, hash,            bstring, "text not null" ) \
+   f( user,  4,  4, hash_sz,         int,     "integer not null" ) \
+   f( user,  5,  5, salt,            bstring, "text not null" ) \
+   f( user,  6,  6, iters,           int,     "integer not null" ) \
+   f( user,  7, -1, join_time, time_t,  "datetime default current_timestamp" ) \
+   f( user,  8,  7, session_timeout, int,     "integer default 3600" ) \
+   f( user,  9,  8, flags,           int,     "integer default 0" ) \
+   f( user, 10,  9, time_fmt,  bstring, "text default '%Y-%m-%d %H:%M %Zs'" ) \
+   f( user, 11, 10, timezone,  int,           "integer default 0" )
+
+#define CHATDB_MESSAGE_TABLE( f ) \
+   f( message, 0, -1, msg_id,             int,     "integer primary key" ) \
+   f( message, 1,  1, msg_type,           int,     "integer not null" ) \
+   f( message, 2,  2, user_from_id,       int,     "integer not null" ) \
+   f( message, 3,  3, room_or_user_to_id, int,     "integer not null" ) \
+   f( message, 4,  4, msg_text,           bstring, "text" ) \
+   f( message, 5, -1, msg_time,  time_t, "datetime default current_timestamp" )
 
 #define chatdb_free_user( u ) \
    bcgi_cleanup_bstr( (u)->user_name, likely ) \
    bcgi_cleanup_bstr( (u)->email, likely ) \
    bcgi_cleanup_bstr( (u)->hash, likely ) \
-   bcgi_cleanup_bstr( (u)->salt, likely )
+   bcgi_cleanup_bstr( (u)->salt, likely ) \
+   bcgi_cleanup_bstr( (u)->time_fmt, likely )
 
-#define CHATDB_USER_TABLE_STRUCT( idx, u, field, c_type, db_type ) c_type field;
+#define chatdb_free_message( m ) \
+   bcgi_cleanup_bstr( (m)->msg_text, likely )
+
+#define CHATDB_TABLE_STRUCT( v, idx, u, field, c_type, db_type ) c_type field;
+
+#define CHATDB_TABLE_ASSIGN( v, idx, u, field, c_type, db_type ) \
+   chatdb_assign_ ## c_type ( &(arg_struct->v->field), argv[idx] );
 
 struct CHATDB_USER {
-   CHATDB_USER_TABLE( CHATDB_USER_TABLE_STRUCT )
+   CHATDB_USER_TABLE( CHATDB_TABLE_STRUCT )
+};
+
+struct CHATDB_MESSAGE {
+   CHATDB_MESSAGE_TABLE( CHATDB_TABLE_STRUCT )
 };
 
 union CHATDB_OPTION_VAL {
@@ -41,8 +62,8 @@ union CHATDB_OPTION_VAL {
 };
 
 typedef int (*chatdb_iter_msg_cb_t)(
-   struct WEBUTIL_PAGE* page,
-   int msg_id, int msg_type, bstring from, int to, bstring text, time_t msg_time );
+   struct WEBUTIL_PAGE* page, struct CCHAT_OP_DATA* op,
+   struct CHATDB_MESSAGE* message, bstring user_name );
 
 typedef int (*chatdb_iter_user_cb_t)(
    struct WEBUTIL_PAGE* page, struct CCHAT_OP_DATA* op, bstring password,
@@ -65,7 +86,8 @@ int chatdb_send_message(
 
 int chatdb_iter_messages(
    struct WEBUTIL_PAGE* page, struct CCHAT_OP_DATA* op,
-   int msg_type, int dest_id, chatdb_iter_msg_cb_t cb, bstring* err_msg_p);
+   struct CHATDB_MESSAGE* message, chatdb_iter_msg_cb_t cb, bstring* err_msg_p
+);
 
 int chatdb_iter_users(
    struct WEBUTIL_PAGE* page, struct CCHAT_OP_DATA* op, bstring password_test,
