@@ -39,5 +39,10 @@ $(document).ready( function() {
    sock.onopen = function( e ) {
       console.log( 'socket open!' );
    };
+
+   sock.onclose = function( e ) {
+      console.log( 'socket closed!' );
+      $('.chat-messages').prop( 'disabled', true );
+   };
 } );
 
