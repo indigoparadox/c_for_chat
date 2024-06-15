@@ -24,6 +24,7 @@ struct CCHAT_OP_DATA {
    pthread_mutex_t db_mutex;
    FCGX_Request req;
    struct RTPROTO_CLIENT* clients;
+   pthread_mutex_t clients_mutex;
    size_t clients_sz_max;
    size_t clients_sz;
    struct CHATDB_USER* auth_user;

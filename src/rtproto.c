@@ -106,6 +106,8 @@ int rtproto_client_add(
 
    dbglog_debug( 2, "adding client for user: %d\n", auth_user_id );
 
+   pthread_mutex_lock( &(op->clients_mutex) );
+
    /* Make sure there's room for the new client. */
    if( NULL == op->clients ) {
       op->clients = calloc( sizeof( struct RTPROTO_CLIENT ), 10 );
@@ -117,7 +119,12 @@ int rtproto_client_add(
       op->clients_sz_max *= 2;
    }
 
-   op->clients[op->clients_sz].buffer = bfromcstr( "" );
+   dbglog_debug( 1, "creating client %d buffer list...\n", op->clients_sz );
+   op->clients[op->clients_sz].buffer = bstrListCreate();
+   bcgi_check_null( op->clients[op->clients_sz].buffer );
+   retval = bstrListAlloc(
+      op->clients[op->clients_sz].buffer, RTPROTO_BUFFER_CT + 1 );
+   bcgi_check_bstr_err( key_list );
    op->clients[op->clients_sz].auth_user_id = auth_user_id;
    *out_idx_p = op->clients_sz;
    op->clients_sz++;
@@ -126,20 +133,56 @@ int rtproto_client_add(
 
 cleanup:
 
+   pthread_mutex_unlock( &(op->clients_mutex) );
+
    return retval;
 }
 
 int rtproto_client_write_all( struct CCHAT_OP_DATA* op, bstring buffer ) {
    int retval = 0;
    size_t i = 0;
+   int buffer_locked = 0;
+   struct RTPROTO_CLIENT* client = NULL;
 
+   dbglog_debug( 1, "locking clients...\n" );
+   pthread_mutex_lock( &(op->clients_mutex) );
    for( i = 0 ; op->clients_sz > i ; i++ ) {
-      retval = bassign( op->clients[i].buffer, buffer );
-      bcgi_check_bstr_err( op->clients[i].buffer );
-      lws_callback_on_writable( op->clients[i].wsi );
+      client = &(op->clients[i]);
+      dbglog_debug( 1, "locking client %d buffer...\n", i );
+      pthread_mutex_lock( &(client->buffer_mutex) );
+      buffer_locked = 1;
+
+      dbglog_debug( 1, "writing to client %d...\n", i );
+
+      assert( NULL != client->buffer );
+      if( RTPROTO_BUFFER_CT - 1 <= client->buffer->qty ) {
+         dbglog_debug( 1, "client %d send buffer full!\n", i );
+         pthread_mutex_unlock( &(client->buffer_mutex) );
+         dbglog_debug( 1, "unlocked client %d buffer...\n", i );
+         buffer_locked = 0;
+         continue;
+      }
+      
+      /* Copy the incoming buffer into the client buffer list. */
+      client->buffer->entry[client->buffer->qty] = bstrcpy( buffer );
+      bcgi_check_null( client->buffer->entry[client->buffer->qty] );
+      client->buffer->qty++;
+
+      lws_callback_on_writable( client->wsi );
+      pthread_mutex_unlock( &(client->buffer_mutex) );
+      dbglog_debug( 1, "unlocked client %d buffer...\n", i );
+      buffer_locked = 0;
    }
 
 cleanup:
+
+   if( buffer_locked ) {
+      assert( NULL != client );
+      pthread_mutex_unlock( &(client->buffer_mutex) );
+      dbglog_debug( 1, "unlocked client %d buffer...\n", i );
+   }
+   pthread_mutex_unlock( &(op->clients_mutex) );
+   dbglog_debug( 1, "unlocked clients...\n" );
 
    return retval;
 }
@@ -150,10 +193,13 @@ int rtproto_client_delete( struct CCHAT_OP_DATA* op, size_t idx ) {
 
    dbglog_debug( 2, "removing client %d...\n", idx );
 
-   bdestroy( op->clients[i].buffer );
-   op->clients[i].buffer = NULL;
-   op->clients[i].wsi = NULL;
-   op->clients[i].auth_user_id = 0;
+   pthread_mutex_lock( &(op->clients_mutex) );
+
+   dbglog_debug( 1, "destroying client %d buffer list...\n", idx );
+   bstrListDestroy( op->clients[idx].buffer );
+   op->clients[idx].buffer = NULL;
+   op->clients[idx].wsi = NULL;
+   op->clients[idx].auth_user_id = 0;
    
    for( i = idx ; op->clients_sz - 1 > i ; i++ ) {
       memcpy( &(op->clients[i]), &(op->clients[i + 1]),
@@ -164,6 +210,8 @@ int rtproto_client_delete( struct CCHAT_OP_DATA* op, size_t idx ) {
 
    dbglog_debug( 2, "client %d removed; %d clients remain.\n",
       idx, op->clients_sz );
+
+   pthread_mutex_unlock( &(op->clients_mutex) );
 
    return retval;
 }

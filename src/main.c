@@ -29,12 +29,14 @@ static struct RTPROTO_CLIENT* main_lws_client_get(
    struct RTPROTO_CLIENT* out = NULL;
    size_t i = 0;
    
+   pthread_mutex_lock( &(op->clients_mutex) );
    for( i = 0 ; op->clients_sz > i ; i++ ) {
       if( wsi == op->clients[i].wsi ) {
          out = &(op->clients[i]);
          break;
       }
    }
+   pthread_mutex_unlock( &(op->clients_mutex) );
 
    return out;
 }
@@ -100,6 +102,8 @@ int main_cb_cchat(
    struct CCHAT_OP_DATA* op = NULL;
    struct lws_context* ctx = NULL;
    struct RTPROTO_CLIENT* client = NULL;
+   size_t i = 0;
+   int buffer_locked = 0;
 
    dbglog_debug( 1, "cb_cchat called: %d\n", reason );
 
@@ -167,16 +171,33 @@ int main_cb_cchat(
       assert( NULL != client->buffer );
 
       assert( NULL == line );
-      line = bfromcstralloc( blength( client->buffer ) + LWS_PRE, "" );
-      bcgi_check_null( line );
-      strncpy(
-         (char*)&(line->data[LWS_PRE]),
-         (char*)(client->buffer->data), blength( client->buffer ) );
-      line->slen = LWS_PRE + blength( client->buffer );
+      pthread_mutex_lock( &(client->buffer_mutex) );
+      buffer_locked = 1;
+      while( 0 < client->buffer->qty ) {
+         /* Copy the first buffered message to a lws packet and send it. */
+         line = bfromcstralloc(
+            blength( client->buffer->entry[0] ) + LWS_PRE, "" );
+         bcgi_check_null( line );
+         strncpy(
+            (char*)&(line->data[LWS_PRE]),
+            (char*)(client->buffer->entry[0]->data),
+            blength( client->buffer->entry[0] ) );
+         line->slen = LWS_PRE + blength( client->buffer->entry[0] );
+         lws_write( wsi,
+            (unsigned char*)&(line->data[LWS_PRE]), line->slen - LWS_PRE,
+            LWS_WRITE_TEXT );
 
-      lws_write( wsi,
-         (unsigned char*)&(line->data[LWS_PRE]), line->slen - LWS_PRE,
-         LWS_WRITE_TEXT );
+         /* Get rid of the copied line. */
+         retval = bdestroy( client->buffer->entry[0] );
+         bcgi_check_bstr_err( client->buffer->entry[0] );
+         for( i = 0 ; client->buffer->qty - 1 > i ; i++ ) {
+            /* Slide subsequent lines down into place. */
+            client->buffer->entry[i] = client->buffer->entry[i + 1];
+            client->buffer->entry[i + 1] = NULL;
+         }
+         client->buffer->qty--;
+      }
+
       break;
 
    case LWS_CALLBACK_CLOSED:
@@ -188,6 +209,10 @@ int main_cb_cchat(
    }
 
 cleanup:
+
+   if( buffer_locked ) {
+      pthread_mutex_unlock( &(client->buffer_mutex) );
+   }
 
    dbglog_debug( 1, "callback complete!\n" );
 

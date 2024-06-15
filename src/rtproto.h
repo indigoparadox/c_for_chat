@@ -2,9 +2,12 @@
 #ifndef RTPROTO_H
 #define RTPROTO_H
 
+#define RTPROTO_BUFFER_CT 10
+
 struct RTPROTO_CLIENT {
    struct lws* wsi;
-   bstring buffer;
+   struct bstrList* buffer;
+   pthread_mutex_t buffer_mutex;
    int auth_user_id;
 };
 
