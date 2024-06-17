@@ -18,9 +18,6 @@ struct WEBUTIL_PAGE {
 int webutil_format_time(
    bstring* out_p, bstring time_fmt, int timezone, time_t epoch );
 
-int webutil_dump_file(
-   FCGX_Request* req, const_bstring filename, const_bstring mimetype );
-
 int webutil_show_page(
    FCGX_Request* req, struct bstrList* q, struct bstrList* p,
    struct WEBUTIL_PAGE* page );

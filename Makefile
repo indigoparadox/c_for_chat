@@ -4,7 +4,9 @@
 CFLAGS :=
 LDFLAGS :=
 
-CCHAT_SOURCES := src/main.c src/bstrlib.c src/cchat.c src/chatdb.c src/bcgi.c src/webutil.c src/rtproto.c
+ASSETS := style.css alert.mp3 chat.js strftime.js
+
+CCHAT_SOURCES := src/main.c src/bstrlib.c src/cchat.c src/chatdb.c src/bcgi.c src/webutil.c src/rtproto.c src/assets.c
 
 PKG_CFG_DEPS := sqlite3 libcurl openssl libcrypto libwebsockets
 
@@ -52,10 +54,14 @@ cchat: $(addprefix obj/,$(subst .c,.o,$(CCHAT_SOURCES)))
 	$(CC) -o $@ $^ $(LDFLAGS)
 	$(STRIP_CMD)
 
-obj/%.o: %.c
+assets/%.h: %
+	mkdir -p $(dir $@)
+	xxd -i $< > $@
+
+obj/%.o: %.c | $(addprefix assets/,$(addsuffix .h,$(ASSETS)))
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c -o $@ $< 
 
 clean:
-	rm -rf cchat obj
+	rm -rf cchat obj assets
 

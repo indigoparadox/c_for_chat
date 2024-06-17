@@ -27,45 +27,6 @@ cleanup:
    return retval;
 }
 
-int webutil_dump_file(
-   FCGX_Request* req, const_bstring filename, const_bstring mimetype
-) {
-   int retval = 0;
-   FILE* fp = NULL;
-   bstring contents = NULL;
-
-   fp = fopen( bdata( filename ), "rb");
-   if( NULL == fp ) {
-      dbglog_error( "couldn't open file %s!\n", bdata( filename ) );
-      retval = RETVAL_FILE;
-      goto cleanup;
-   }
-
-   contents = bread( (bNread)fread, fp );
-   if( NULL == contents ) {
-      dbglog_error( "couldn't read file %s!\n", bdata( filename ) );
-      retval = RETVAL_FILE;
-      goto cleanup;
-   }
-
-   dbglog_debug( 1, "%s: %d bytes\n", bdata( filename ), blength( contents ) );
-
-   FCGX_FPrintF( req->out, "Content-type: %s\r\n", bdata( mimetype ) );
-   FCGX_FPrintF( req->out, "Status: 200\r\n\r\n" );
-
-   FCGX_PutStr( bdata( contents ), blength( contents ), req->out );
-
-cleanup:
-
-   if( NULL != fp ) {
-      fclose( fp );
-   }
-
-   bcgi_cleanup_bstr( contents, likely );
-
-   return retval;
-}
-
 int webutil_add_script( struct WEBUTIL_PAGE* page, const char* script ) {
    int retval = 0;
 

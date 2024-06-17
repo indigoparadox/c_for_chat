@@ -32,6 +32,7 @@ struct CCHAT_OP_DATA {
 
 #include "bcgi.h"
 #include "webutil.h"
+#include "assets.h"
 #include "cchat.h"
 #include "chatdb.h"
 #include "dbglog.h"

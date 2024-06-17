@@ -902,7 +902,7 @@ int cchat_file(
 
    bcgi_check_null( mime );
 
-   retval = webutil_dump_file( &(op->req), arg, mime );
+   retval = assets_dump_file( &(op->req), arg, mime );
 
 cleanup:
 

@@ -1,0 +1,5 @@
+*.log
+cchat*
+chat.db*
+obj
+assets
