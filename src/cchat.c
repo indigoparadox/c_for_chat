@@ -4,26 +4,26 @@
 #include <stdlib.h> /* for atoi() */
 
 typedef int (*cchat_route_cb_t)(
-   struct CCHAT_OP_DATA* op,
+   struct CCHAT_OP_DATA* op, const_bstring arg,
    struct bstrList* q, struct bstrList* p, struct bstrList* c );
 
 extern bstring g_recaptcha_site_key;
 extern bstring g_recaptcha_secret_key;
 
 #define CCHAT_ROUTES_TABLE( f ) \
-   f( "/logout", cchat_route_logout, "GET" ) \
-   f( "/profile", cchat_route_profile, "GET" ) \
-   f( "/user", cchat_route_user, "POST" ) \
-   f( "/login", cchat_route_login, "GET" ) \
-   f( "/auth", cchat_route_auth, "POST" ) \
-   f( "/send", cchat_route_send, "POST" ) \
-   f( "/chat", cchat_route_chat, "GET" ) \
-   f( "/style.css", cchat_route_style_css, "GET" ) \
-   f( "/strftime.js", cchat_route_strftime_js, "GET" ) \
-   f( "/chat.js", cchat_route_chat_js, "GET" ) \
-   f( "/alert.mp3", cchat_route_alert_mp3, "GET" ) \
-   f( "/", cchat_route_root, "GET" ) \
-   f( "", NULL, "" )
+   f( "/logout",        cchat_route_logout,  "",            "GET" ) \
+   f( "/profile",       cchat_route_profile, "",            "GET" ) \
+   f( "/user",          cchat_route_user,    "",            "POST" ) \
+   f( "/login",         cchat_route_login,   "",            "GET" ) \
+   f( "/auth",          cchat_route_auth,    "",            "POST" ) \
+   f( "/send",          cchat_route_send,    "",            "POST" ) \
+   f( "/chat",          cchat_route_chat,    "",            "GET" ) \
+   f( "/style.css",     cchat_file,          "style.css",   "GET" ) \
+   f( "/strftime.js",   cchat_file,          "strftime.js", "GET" ) \
+   f( "/chat.js",       cchat_file,          "chat.js",     "GET" ) \
+   f( "/alert.mp3",     cchat_file,          "alert.mp3",   "GET" ) \
+   f( "/",              cchat_route_root,    "",            "GET" ) \
+   f( "",               NULL,                "",            "" )
 
 #define cchat_check_null( err_msg, rv, field ) \
    if( NULL == field ) { \
@@ -74,7 +74,7 @@ extern bstring g_recaptcha_secret_key;
       def, list, field_name, field_name ## _decode, field_name );
 
 int cchat_route_logout(
-   struct CCHAT_OP_DATA* op,
+   struct CCHAT_OP_DATA* op, const_bstring arg,
    struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
@@ -234,13 +234,12 @@ cleanup:
 }
 
 int cchat_route_profile(
-   struct CCHAT_OP_DATA* op,
+   struct CCHAT_OP_DATA* op, const_bstring arg,
    struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
    struct tagbstring page_title = bsStatic( "Profile" );
    struct WEBUTIL_PAGE page = { 0, 0, 0 };
-   struct tagbstring empty_string = bsStatic( "" );
    struct CHATDB_USER user;
    bstring err_msg = NULL;
 
@@ -283,7 +282,7 @@ cleanup:
 }
 
 int cchat_route_user(
-   struct CCHAT_OP_DATA* op,
+   struct CCHAT_OP_DATA* op, const_bstring arg,
    struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
@@ -412,7 +411,7 @@ cleanup:
 }
 
 int cchat_route_login(
-   struct CCHAT_OP_DATA* op,
+   struct CCHAT_OP_DATA* op, const_bstring arg,
    struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
@@ -502,7 +501,7 @@ cleanup:
 }
 
 int cchat_route_auth(
-   struct CCHAT_OP_DATA* op,
+   struct CCHAT_OP_DATA* op, const_bstring arg,
    struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
@@ -610,7 +609,7 @@ cleanup:
 }
 
 int cchat_route_send(
-   struct CCHAT_OP_DATA* op,
+   struct CCHAT_OP_DATA* op, const_bstring arg,
    struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
@@ -644,13 +643,6 @@ int cchat_route_send(
 
    /* There is POST data, so try to decode it. */
    cchat_decode_field( NULL, p, chat );
-
-   /*
-   retval = chatdb_send_message( op, auth_user_id, chat_decode, &err_msg );
-   if( retval ) {
-      goto cleanup;
-   }
-   */
 
    /* TODO: Insert destination. */
    binsertStatic( chat, 0, "PRIVMSG : ", '\0' );
@@ -721,7 +713,7 @@ cleanup:
 }
 
 int cchat_route_chat(
-   struct CCHAT_OP_DATA* op,
+   struct CCHAT_OP_DATA* op, const_bstring arg,
    struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
@@ -731,10 +723,8 @@ int cchat_route_chat(
    bstring mini = NULL;
    struct WEBUTIL_PAGE page = { 0, 0, 0 };
    struct CHATDB_MESSAGE message;
-   const struct tagbstring cs_login_err_session =
-      bsStatic( "/login?error=Invalid session cookie!" );
-   const struct tagbstring cs_login_err_user =
-      bsStatic( "/login?error=Invalid user!" );
+   const struct tagbstring err_iter_msg = bsStatic(
+      "Error fetching/displaying messages!" );
 
    page.title = &page_title;
    page.flags = 0;
@@ -742,8 +732,7 @@ int cchat_route_chat(
    memset( &message, '\0', sizeof( struct CHATDB_MESSAGE ) );
 
    if( NULL == op->auth_user ) {
-      dbglog_debug( 3, "/chat access by unauthorized user!\n" );
-      webutil_redirect( &(op->req), &cs_login_err_session, 0 );
+      retval = webutil_unauthorized( &(op->req) );
       goto cleanup;
    }
 
@@ -829,8 +818,8 @@ int cchat_route_chat(
       retval = chatdb_iter_messages(
          &page, op, &message, cchat_print_msg_cb, &err_msg );
       if( retval ) {
-         /* TODO: 500 error? */
          dbglog_error( "error iteraing messages!\n" );
+         retval = webutil_server_error( &(op->req), &err_iter_msg );
          goto cleanup;
       }
 
@@ -845,9 +834,8 @@ int cchat_route_chat(
       /* Grab the session for CSRF use. */
       retval = bcgi_query_key( c, "session", &session );
       if( retval || NULL == session ) {
-         /* TODO: 500 error? */
          dbglog_error( "unable to determine session cookie hash!\n" );
-         retval = RETVAL_PARAMS;
+         retval = webutil_unauthorized( &(op->req) );
          goto cleanup;
       }
 
@@ -881,53 +869,50 @@ cleanup:
    return retval;
 }
 
-int cchat_route_style_css(
-   struct CCHAT_OP_DATA* op,
+int cchat_file(
+   struct CCHAT_OP_DATA* op, const_bstring arg,
    struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
+   struct tagbstring cs_mime_css = bsStatic( "text/css" );
+   struct tagbstring cs_mime_mp3 = bsStatic( "auto/mpeg3" );
+   struct tagbstring cs_mime_js = bsStatic( "application/javascript" );
+   bstring extension = NULL;
+   const_bstring mime = NULL;
+   int ext_pos = 0;
 
-   retval = webutil_dump_file( &(op->req), "style.css", "text/css" );
+   ext_pos = bstrrchr( arg, '.' );
+   if( BSTR_ERR == ext_pos ) {
+      webutil_server_error( &(op->req), NULL );
+      dbglog_error( "invalid file extension for file: %s\n", bdata( arg ) );
+      retval = RETVAL_PARAMS;
+      goto cleanup;
+   }
 
-   return retval;
-}
+   extension = bmidstr( arg, ext_pos, blength( arg ) - ext_pos );
+   bcgi_check_null( extension );
 
-int cchat_route_strftime_js(
-   struct CCHAT_OP_DATA* op,
-   struct bstrList* q, struct bstrList* p, struct bstrList* c
-) {
-   int retval = 0;
+   if( 1 == biseqcaselessblk( extension, ".js", 3 ) ) {
+      mime = &cs_mime_js;
+   } else if( 1 == biseqcaselessblk( extension, ".css", 4 ) ) {
+      mime = &cs_mime_css;
+   } else if( 1 == biseqcaselessblk( extension, ".mp3", 4 ) ) {
+      mime = &cs_mime_mp3;
+   }
 
-   retval = webutil_dump_file( &(op->req), "strftime.js", "text/javascript" );
+   bcgi_check_null( mime );
 
-   return retval;
-}
+   retval = webutil_dump_file( &(op->req), arg, mime );
 
-int cchat_route_chat_js(
-   struct CCHAT_OP_DATA* op,
-   struct bstrList* q, struct bstrList* p, struct bstrList* c
-) {
-   int retval = 0;
+cleanup:
 
-   retval = webutil_dump_file( &(op->req), "chat.js", "text/javascript" );
-
-   return retval;
-}
-
-int cchat_route_alert_mp3(
-   struct CCHAT_OP_DATA* op,
-   struct bstrList* q, struct bstrList* p, struct bstrList* c
-) {
-   int retval = 0;
-
-   retval = webutil_dump_file( &(op->req), "alert.mp3", "audio/mp3" );
+   bcgi_cleanup_bstr( extension, likely );
 
    return retval;
 }
-
 
 int cchat_route_root(
-   struct CCHAT_OP_DATA* op,
+   struct CCHAT_OP_DATA* op, const_bstring arg,
    struct bstrList* q, struct bstrList* p, struct bstrList* c
 ) {
    int retval = 0;
@@ -946,22 +931,28 @@ int cchat_route_root(
 
 /* Translate the tables above into lookup tables. */
 
-#define CCHAT_ROUTES_TABLE_PATHS( path, cb, method ) bsStatic( path ),
+#define CCHAT_ROUTES_TABLE_PATHS( path, cb, arg, method ) bsStatic( path ),
 
 struct tagbstring gc_cchat_route_paths[] = {
    CCHAT_ROUTES_TABLE( CCHAT_ROUTES_TABLE_PATHS )
 };
 
-#define CCHAT_ROUTES_TABLE_METHODS( path, cb, method ) bsStatic( method ),
+#define CCHAT_ROUTES_TABLE_METHODS( path, cb, arg, method ) bsStatic( method ),
 
 struct tagbstring gc_cchat_route_methods[] = {
    CCHAT_ROUTES_TABLE( CCHAT_ROUTES_TABLE_METHODS )
 };
 
-#define CCHAT_ROUTES_TABLE_CBS( path, cb, method ) cb,
+#define CCHAT_ROUTES_TABLE_CBS( path, cb, arg, method ) cb,
 
 cchat_route_cb_t gc_cchat_route_cbs[] = {
    CCHAT_ROUTES_TABLE( CCHAT_ROUTES_TABLE_CBS )
+};
+
+#define CCHAT_ROUTES_TABLE_ARGS( path, cb, arg, method ) bsStatic( arg ),
+
+struct tagbstring gc_cchat_route_args[] = {
+   CCHAT_ROUTES_TABLE( CCHAT_ROUTES_TABLE_ARGS )
 };
 
 int cchat_auth_session_cb(
@@ -991,8 +982,6 @@ int cchat_handle_req( struct CCHAT_OP_DATA* op ) {
    struct bstrList* req_query_list = NULL;
    struct bstrList* post_buf_list = NULL;
    struct bstrList* req_cookie_list = NULL;
-   const struct tagbstring cs_login_err_user =
-      bsStatic( "/login?error=Invalid user!" );
 
    if( 0 >= g_dbglog_level ) {
       while( NULL != op->req.envp[i] ) {
@@ -1039,8 +1028,8 @@ int cchat_handle_req( struct CCHAT_OP_DATA* op ) {
             retval = chatdb_iter_users(
                NULL, op, NULL, op->auth_user, NULL, NULL );
             if( retval ) {
-               dbglog_error( "error fetching user!\n" );
-               webutil_redirect( &(op->req), &cs_login_err_user, 0 );
+               /* Found a user, but it's not valid! Maybe deleted/disabled! */
+               retval = webutil_unauthorized( &(op->req) );
                goto cleanup;
             }
          } else {
@@ -1088,7 +1077,7 @@ int cchat_handle_req( struct CCHAT_OP_DATA* op ) {
 
       /* A valid route was found! */
       retval = gc_cchat_route_cbs[i](
-         op,
+         op, &(gc_cchat_route_args[i]),
          req_query_list, post_buf_list, req_cookie_list );
    } else {
       dbglog_debug(

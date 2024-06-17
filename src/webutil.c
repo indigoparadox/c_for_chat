@@ -28,29 +28,29 @@ cleanup:
 }
 
 int webutil_dump_file(
-   FCGX_Request* req, const char* filename, const char* mimetype
+   FCGX_Request* req, const_bstring filename, const_bstring mimetype
 ) {
    int retval = 0;
    FILE* fp = NULL;
    bstring contents = NULL;
 
-   fp = fopen( filename, "rb");
+   fp = fopen( bdata( filename ), "rb");
    if( NULL == fp ) {
-      dbglog_error( "couldn't open file %s!\n", filename );
+      dbglog_error( "couldn't open file %s!\n", bdata( filename ) );
       retval = RETVAL_FILE;
       goto cleanup;
    }
 
    contents = bread( (bNread)fread, fp );
    if( NULL == contents ) {
-      dbglog_error( "couldn't read file %s!\n", filename );
+      dbglog_error( "couldn't read file %s!\n", bdata( filename ) );
       retval = RETVAL_FILE;
       goto cleanup;
    }
 
-   dbglog_debug( 1, "%s: %d bytes\n", filename, blength( contents ) );
+   dbglog_debug( 1, "%s: %d bytes\n", bdata( filename ), blength( contents ) );
 
-   FCGX_FPrintF( req->out, "Content-type: %s\r\n", mimetype );
+   FCGX_FPrintF( req->out, "Content-type: %s\r\n", bdata( mimetype ) );
    FCGX_FPrintF( req->out, "Status: 200\r\n\r\n" );
 
    FCGX_PutStr( bdata( contents ), blength( contents ), req->out );
@@ -292,16 +292,37 @@ int webutil_redirect( FCGX_Request* req, const_bstring url, uint8_t flags ) {
    return retval;
 }
 
-int webutil_server_error( FCGX_Request *req, bstring msg ) {
+int webutil_server_error( FCGX_Request *req, const_bstring msg ) {
    int retval = 0;
 
    FCGX_FPrintF( req->out, "Status: 500 Internal Server Error\r\n" );
    FCGX_FPrintF( req->out, "\r\n" ); 
 
+   FCGX_FPrintF( req->out, "<html><head>" );
+   FCGX_FPrintF( req->out, "<title>Internal Server Error</title>" );
+   FCGX_FPrintF( req->out, "</head><body>" ); 
    FCGX_FPrintF( req->out, "<h1>500: Internal Server Error</h1>" ); 
    if( NULL != msg ) {
       FCGX_FPrintF( req->out, "<p>Message: %s</p>", bdata( msg ) ); 
    }
+   FCGX_FPrintF( req->out, "</body></html>" ); 
+
+   return retval;
+}
+
+int webutil_unauthorized( FCGX_Request *req ) {
+   int retval = 0;
+
+   FCGX_FPrintF( req->out, "Status: 401 Unauthorized\r\n" );
+   FCGX_FPrintF( req->out, "\r\n" ); 
+
+   FCGX_FPrintF( req->out, "<html><head>" );
+   FCGX_FPrintF( req->out, "<title>Unauthorized</title>" );
+   FCGX_FPrintF( req->out, "</head><body>" ); 
+   FCGX_FPrintF( req->out, "<h1>401 Unauthorized</h1>" ); 
+   FCGX_FPrintF(
+      req->out, "<p>Please try <a href=\"/login\">logging in</a>!</p>" );
+   FCGX_FPrintF( req->out, "</body></html>" ); 
 
    return retval;
 }
@@ -312,7 +333,13 @@ int webutil_not_found( FCGX_Request *req ) {
    FCGX_FPrintF( req->out, "Status: 404 Not Found\r\n" );
    FCGX_FPrintF( req->out, "\r\n" ); 
 
+   FCGX_FPrintF( req->out, "<html><head>" );
+   FCGX_FPrintF( req->out, "<title>Not Found</title>" );
+   FCGX_FPrintF( req->out, "</head><body>" ); 
    FCGX_FPrintF( req->out, "<h1>404 Not Found</h1>" ); 
+   FCGX_FPrintF(
+      req->out, "<p>Continue to <a href=\"/login\">login</a>...</p>" );
+   FCGX_FPrintF( req->out, "</body></html>" ); 
 
    return retval;
 }

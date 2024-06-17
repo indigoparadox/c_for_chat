@@ -19,7 +19,7 @@ int webutil_format_time(
    bstring* out_p, bstring time_fmt, int timezone, time_t epoch );
 
 int webutil_dump_file(
-   FCGX_Request* req, const char* filename, const char* mimetype );
+   FCGX_Request* req, const_bstring filename, const_bstring mimetype );
 
 int webutil_show_page(
    FCGX_Request* req, struct bstrList* q, struct bstrList* p,
@@ -33,7 +33,9 @@ int webutil_get_cookies( struct bstrList** out_p, struct CCHAT_OP_DATA* op );
 
 int webutil_redirect( FCGX_Request* req, const_bstring url, uint8_t flags );
 
-int webutil_server_error( FCGX_Request *req, bstring msg );
+int webutil_server_error( FCGX_Request *req, const_bstring msg );
+
+int webutil_unauthorized( FCGX_Request *req );
 
 int webutil_not_found( FCGX_Request *req );
 
