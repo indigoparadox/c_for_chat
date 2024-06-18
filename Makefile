@@ -1,7 +1,7 @@
 
 # vim: ft=make noexpandtab
 
-CFLAGS := -fstack-protector-all -fPIE -pie -Wall -Werror -D_FORTIFY_SOURCE=3 -fcf-protection=full
+CFLAGS := -fstack-protector-all -fPIE -Wall -Werror -D_FORTIFY_SOURCE=3 -fcf-protection=full
 LDFLAGS :=
 
 ASSETS := style.css alert.mp3 chat.js strftime.js
@@ -29,6 +29,7 @@ CFLAGS += -Wno-ignored-attributes
 LIBS_STATIC_DEPS := $(LIBS_STATIC_DEPS_FREEBSD)
 else
 LIBS_STATIC_DEPS := $(LIBS_STATIC_DEPS_ALPINE)
+CFLAGS += -pie
 endif
 
 ifeq ("$(BUILD)", "STATIC")
