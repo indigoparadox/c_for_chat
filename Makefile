@@ -1,7 +1,7 @@
 
 # vim: ft=make noexpandtab
 
-CFLAGS :=
+CFLAGS := -fstack-protector-all -fPIE -pie -Wall -Werror -D_FORTIFY_SOURCE=3 -fcf-protection=full
 LDFLAGS :=
 
 ASSETS := style.css alert.mp3 chat.js strftime.js

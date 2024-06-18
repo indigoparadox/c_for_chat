@@ -973,6 +973,14 @@ int chatdb_add_session(
 
 cleanup:
 
+   if( NULL != query ) {
+      sqlite3_free( query );
+   }
+
+   if( NULL != err_msg ) {
+      sqlite3_free( err_msg );
+   }
+
    return retval;
 }
 

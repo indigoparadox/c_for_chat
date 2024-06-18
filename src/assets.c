@@ -57,6 +57,9 @@ int assets_dump_file(
 
    dbglog_debug( 1, "%s: %d bytes\n", bdata( filename ), blength( contents ) );
 #else
+   struct tagbstring err_file_ptr =
+      bsStatic( "Invalid file pointer selected." );
+
    for( i = 0 ; NULL != gc_assets_ptrs[i] ; i++ ) {
       if( 0 == bstrcmp( filename, &(gc_assets_names[i]) ) ) {
          break;
@@ -64,6 +67,11 @@ int assets_dump_file(
    }
 
    assert( NULL != gc_assets_ptrs[i] );
+   if( NULL == gc_assets_ptrs[i] ) {
+      dbglog_error( "invalid file pointer selected!\n" );
+      retval = webutil_server_error( req, &err_file_ptr );
+      goto cleanup;
+   }
 #endif
 
    FCGX_FPrintF( req->out, "Content-type: %s\r\n", bdata( mimetype ) );
