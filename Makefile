@@ -29,7 +29,7 @@ CFLAGS += -Wno-ignored-attributes
 LIBS_STATIC_DEPS := $(LIBS_STATIC_DEPS_FREEBSD)
 else
 LIBS_STATIC_DEPS := $(LIBS_STATIC_DEPS_ALPINE)
-CFLAGS += -pie
+CFLAGS += -pie -DUSE_LWS_OLD_RETRY
 endif
 
 ifeq ("$(BUILD)", "STATIC")
