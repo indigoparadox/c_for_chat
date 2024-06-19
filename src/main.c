@@ -1,5 +1,4 @@
 
-
 #define DBGLOG_C
 #include "main.h"
 
@@ -23,6 +22,10 @@ enum lws_protocol_list {
 	PROTOCOL_HTTP = 0,
 	PROTOCOL_CCHAT,
 };
+
+static void main_lws_logger( int level, const char *line ) {
+   dbglog_debug( 1, "%s", line );
+}
 
 static struct RTPROTO_CLIENT* main_lws_client_get(
    struct CCHAT_OP_DATA* op, struct lws* wsi
@@ -297,9 +300,13 @@ no_g_op:
 
 static void* main_lws_handler( void* v_ctx ) {
 
+   dbglog_debug( 1, "websocket handler thread started...\n" );
+
    while( g_lws_running ) {
       lws_service( g_lws_ctx, 10000 );
    }
+
+   dbglog_debug( 1, "websocket handler thread stopping...\n" );
 
    return NULL;
 }
@@ -318,6 +325,8 @@ int main( int argc, char* argv[] ) {
 
    g_op = calloc( sizeof( struct CCHAT_OP_DATA ), 1 );
    bcgi_check_null( g_op );
+
+   lws_set_log_level( 0xffffffff, main_lws_logger );
 
 #ifndef USE_LWS_OLD_RETRY
    memset( &lws_retry, 0, sizeof( lws_retry_bo_t ) );
@@ -338,7 +347,7 @@ int main( int argc, char* argv[] ) {
 #endif /* USE_LWS_OLD_RETRY */
 
    /* Parse args. */
-   while( -1 != (o = getopt( argc, argv, "l:d:s:" )) ) {
+   while( -1 != (o = getopt( argc, argv, "l:d:s:w:" )) ) {
       switch( o ) {
       case 'l':
          if( NULL != log_path ) {
@@ -417,9 +426,11 @@ int main( int argc, char* argv[] ) {
    FCGX_Init();
    memset( &(g_op->req), 0, sizeof( FCGX_Request ) );
 
-   dbglog_debug( 3, "starting socket server...\n" );
+   dbglog_debug( 3, "starting socket server on port: %d\n",
+      lws_info.port );
 
    g_lws_ctx = lws_create_context( &lws_info );
+   bcgi_check_null( g_lws_ctx );
 
    if( pthread_create( &sock_thd, NULL, main_lws_handler, g_lws_ctx ) ) {
       dbglog_error( "error creating client socket thread!\n" );

@@ -536,7 +536,7 @@ int chatdb_init( bstring path, struct CCHAT_OP_DATA* op ) {
 
    case 2:
       _chatdb_alter_table( 3, op->db, &(op->db_mutex),
-         "alter table users add column time_fmt text default '%Y-%m-%d %H:%M %Zs'" );
+         "alter table users add column time_fmt text default '%Y-%m-%d %H:%M %Z'" );
 
    case 3:
       _chatdb_alter_table( 4, op->db, &(op->db_mutex),

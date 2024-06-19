@@ -7,7 +7,7 @@ function chatCreateSock() {
    console.log( 'attempting socket connection...' )
 
    sock = new WebSocket(
-      'ws://' + cchat_url + '/chat_sock/', 'cchat-protocol' );
+      'wss://' + cchat_url + '/chat_sock/', 'cchat-protocol' );
 
    sock.onmessage = function( e ) {
 

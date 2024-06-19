@@ -22,7 +22,7 @@
    f( user,  7, -1, join_time, time_t,  "datetime default current_timestamp" ) \
    f( user,  8,  7, session_timeout, int,     "integer default 3600" ) \
    f( user,  9,  8, flags,           int,     "integer default 0" ) \
-   f( user, 10,  9, time_fmt,  bstring, "text default '%Y-%m-%d %H:%M %Zs'" ) \
+   f( user, 10,  9, time_fmt,  bstring, "text default '%Y-%m-%d %H:%M %Z'" ) \
    f( user, 11, 10, timezone,  int,           "integer default 0" )
 
 #define CHATDB_MESSAGE_TABLE( f ) \

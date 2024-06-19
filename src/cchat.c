@@ -105,6 +105,20 @@ static int cchat_profile_form(
 ) {
    int retval = 0;
 
+   dbglog_debug( 1, "building profile form...\n" );
+
+   assert( NULL != page );
+
+   #define cchat_user_field_int( user, field, def ) \
+      (NULL == user ? def : user->field)
+
+   #define cchat_user_field_bstring( user, field, def ) \
+      (NULL == user ? def : bdata( user->field ))
+
+   #define cchat_user_field_flag( user, flag ) \
+      (NULL == user ? "" : (flag == (flag & user->flags)) ? \
+         " checked=\"checked\"" : "")
+
    retval = bassignformat(
       page->text,
       "<div class=\"profile-form\">\n"
@@ -144,16 +158,20 @@ static int cchat_profile_form(
             "<label for=\"flags_ws\">Use websockets: </label>"
             "<input type=\"checkbox\" id=\"flags_ws\" "
                "name=\"flags_ws\"%s /></div>\n",
-      bdata( user->user_name ), bdata( user->email ), user->session_timeout,
-      bdata( user->time_fmt ), user->timezone,
-      (CHATDB_USER_FLAG_WS == (CHATDB_USER_FLAG_WS & user->flags)) ?
-         " checked=\"checked\"" : ""
+      cchat_user_field_bstring( user, user_name, "" ),
+      cchat_user_field_bstring( user, email, "" ),
+      cchat_user_field_int( user, session_timeout, 3600 ),
+      cchat_user_field_bstring( user, time_fmt, "%Y-%m-%d %H:%M %Z" ),
+      cchat_user_field_int( user, timezone, 0 ),
+      cchat_user_field_flag( user, CHATDB_USER_FLAG_WS )
    );
 
    cchat_check_bstr_err( err_msg, RETVAL_ALLOC, page->text );
    cchat_check_null( err_msg, RETVAL_ALLOC, page->text );
 
    if( NULL != session ) {
+      dbglog_debug( 1, "adding CSRF token to form...\n" );
+
       retval = bformata( page->text,
          "<input type=\"hidden\" name=\"csrf\" value=\"%s\" />\n",
          bdata( session ) );
@@ -162,6 +180,8 @@ static int cchat_profile_form(
    }
 
    if( NULL != bdata( g_recaptcha_site_key ) ) {
+      dbglog_debug( 1, "adding ReCAPTCHA field to form...\n" );
+
       /* Add recaptcha if key present. */
       retval = bformata( page->text,
          "<div class=\"g-recaptcha\" data-sitekey=\"%s\"></div>\n",
@@ -177,12 +197,16 @@ static int cchat_profile_form(
       }
    }
 
+   dbglog_debug( 1, "adding submit button to form...\n" );
+
    retval = bcatcstr( page->text,
       "<div class=\"profile-field profile-button\">"
          "<input type=\"submit\" name=\"submit\" value=\"Submit\" />"
       "</div>\n</form>\n</div>\n" );
    cchat_check_bstr_err( err_msg, RETVAL_ALLOC, page->text );
  
+   dbglog_debug( 1, "form built, returning...\n" );
+
 cleanup:
 
    return retval;
