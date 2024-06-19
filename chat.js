@@ -7,7 +7,7 @@ function chatCreateSock() {
    console.log( 'attempting socket connection...' )
 
    sock = new WebSocket(
-      'ws://zarchat.interfinitydynamics.info/chat_sock', 'cchat-protocol' );
+      'ws://' + cchat_url + '/chat_sock/', 'cchat-protocol' );
 
    sock.onmessage = function( e ) {
 

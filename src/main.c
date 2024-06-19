@@ -12,6 +12,7 @@
 
 extern bstring g_recaptcha_site_key;
 extern bstring g_recaptcha_secret_key;
+extern bstring g_cchat_url;
 
 static int g_cgi_sock = -1;
 struct lws_context* g_lws_ctx = NULL;
@@ -388,6 +389,8 @@ int main( int argc, char* argv[] ) {
       bcgi_check_null( server_listen );
    }
 
+   g_cchat_url = bfromcstr( getenv( "CCHAT_URL" ) );
+
    dbglog_debug( 3, "checking environment...\n" );
    g_recaptcha_site_key = bfromcstr( getenv( "CCHAT_RECAPTCHA_SITE" ) );
    if( NULL == g_recaptcha_site_key ) {
@@ -451,6 +454,7 @@ cleanup:
    bcgi_cleanup_bstr( log_path, likely );
    bcgi_cleanup_bstr( g_recaptcha_site_key, likely );
    bcgi_cleanup_bstr( g_recaptcha_secret_key, likely );
+   bcgi_cleanup_bstr( g_cchat_url, likely );
 
    main_shutdown( 0 );
 

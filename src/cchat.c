@@ -10,6 +10,8 @@ typedef int (*cchat_route_cb_t)(
 extern bstring g_recaptcha_site_key;
 extern bstring g_recaptcha_secret_key;
 
+bstring g_cchat_url = NULL;
+
 #define CCHAT_ROUTES_TABLE( f ) \
    f( "/logout",        cchat_route_logout,  "",            "GET" ) \
    f( "/profile",       cchat_route_profile, "",            "GET" ) \
@@ -725,6 +727,7 @@ int cchat_route_chat(
    struct CHATDB_MESSAGE message;
    const struct tagbstring err_iter_msg = bsStatic(
       "Error fetching/displaying messages!" );
+   bstring js_vars = NULL;
 
    page.title = &page_title;
    page.flags = 0;
@@ -739,12 +742,20 @@ int cchat_route_chat(
    page.text = bfromcstr( "" );
    cchat_check_null( err_msg, RETVAL_ALLOC, page.text );
 
+   js_vars = bformat(
+      "<script type=\"text/javascript\">\n"
+         "const cchat_url=\"%s\";\n"
+      "</script>\n",
+      bdata( g_cchat_url ) );
+   cchat_check_null( err_msg, RETVAL_ALLOC, js_vars );
+
    if( CHATDB_USER_FLAG_WS == (CHATDB_USER_FLAG_WS & op->auth_user->flags) ) {
       /* Add refresher/convenience script. */
       retval = webutil_add_script( &page,
          "<script src=\"https://code.jquery.com/jquery-2.2.4.min.js\" integrity=\"sha256-BbhdlvQf/xTY9gja0Dq3HiwQF8LaCRTXxZKRutelT44=\" crossorigin=\"anonymous\"></script>\n" );
       retval = webutil_add_script( &page,
          "<script type=\"text/javascript\" src=\"strftime.js\"></script>\n" );
+      retval = webutil_add_script( &page, bdata( js_vars ) );
       retval = webutil_add_script( &page,
          "<script type=\"text/javascript\" src=\"chat.js\"></script>\n" );
    }
@@ -865,6 +876,7 @@ cleanup:
    bcgi_cleanup_bstr( session, likely );
    bcgi_cleanup_bstr( page.text, likely );
    bcgi_cleanup_bstr( err_msg, unlikely );
+   bcgi_cleanup_bstr( js_vars, likely );
 
    return retval;
 }
