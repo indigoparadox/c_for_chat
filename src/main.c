@@ -321,6 +321,7 @@ int main( int argc, char* argv[] ) {
    lws_info.port = 9777;
    lws_info.protocols = lws_protocol_info;
    lws_info.user = g_op;
+   lws_info.ws_ping_pong_interval = 5;
 
    /* Parse args. */
    while( -1 != (o = getopt( argc, argv, "l:d:s:" )) ) {
