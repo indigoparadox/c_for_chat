@@ -311,9 +311,18 @@ int main( int argc, char* argv[] ) {
    bstring server_listen = NULL;
    struct lws_context_creation_info lws_info;
    pthread_t sock_thd;
+#ifndef USE_LWS_OLD_RETRY
+   lws_retry_bo_t lws_retry;
+#endif /* !USE_LWS_OLD_RETRY */
 
    g_op = calloc( sizeof( struct CCHAT_OP_DATA ), 1 );
    bcgi_check_null( g_op );
+
+#ifndef USE_LWS_OLD_RETRY
+   memset( &lws_retry, 0, sizeof( lws_retry_bo_t ) );
+   lws_retry.secs_since_valid_ping = 5;
+   lws_retry.secs_since_valid_hangup = 10;
+#endif /* !USE_LWS_OLD_RETRY */
 
    memset( &lws_info, 0, sizeof( struct lws_context_creation_info ) );
    lws_info.gid = -1;
@@ -321,7 +330,11 @@ int main( int argc, char* argv[] ) {
    lws_info.port = 9777;
    lws_info.protocols = lws_protocol_info;
    lws_info.user = g_op;
+#ifdef USE_LWS_OLD_RETRY
    lws_info.ws_ping_pong_interval = 5;
+#else
+   lws_info.retry_and_idle_policy = &lws_retry;
+#endif /* USE_LWS_OLD_RETRY */
 
    /* Parse args. */
    while( -1 != (o = getopt( argc, argv, "l:d:s:" )) ) {
