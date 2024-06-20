@@ -317,6 +317,7 @@ int main( int argc, char* argv[] ) {
    int o = 0;
    bstring log_path = NULL;
    bstring server_listen = NULL;
+   bstring sock_iface = NULL;
    struct lws_context_creation_info lws_info;
    pthread_t sock_thd;
 #ifndef USE_LWS_OLD_RETRY
@@ -347,8 +348,16 @@ int main( int argc, char* argv[] ) {
 #endif /* USE_LWS_OLD_RETRY */
 
    /* Parse args. */
-   while( -1 != (o = getopt( argc, argv, "l:d:s:w:" )) ) {
+   while( -1 != (o = getopt( argc, argv, "l:d:s:w:i:" )) ) {
       switch( o ) {
+      case 'i':
+         sock_iface = bfromcstr( optarg );
+         bcgi_check_null( sock_iface );
+
+         lws_info.iface = (const char*)(sock_iface->data);
+
+         break;
+
       case 'l':
          if( NULL != log_path ) {
             retval = RETVAL_PARAMS;
@@ -466,6 +475,7 @@ cleanup:
    bcgi_cleanup_bstr( g_recaptcha_site_key, likely );
    bcgi_cleanup_bstr( g_recaptcha_secret_key, likely );
    bcgi_cleanup_bstr( g_cchat_url, likely );
+   bcgi_cleanup_bstr( sock_iface, likely );
 
    main_shutdown( 0 );
 
