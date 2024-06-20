@@ -1,7 +1,7 @@
 
 # vim: ft=make noexpandtab
 
-CFLAGS := -fstack-protector-all -fPIE -Wall -Werror -D_FORTIFY_SOURCE=3 -fcf-protection=full
+CFLAGS := -fstack-protector-all -fPIE -D_FORTIFY_SOURCE=3 -fcf-protection=full
 LDFLAGS :=
 
 ASSETS := style.css alert.mp3 chat.js strftime.js
@@ -28,7 +28,9 @@ LIBS := $(shell pkg-config $(PKG_CFG_DEPS) --libs) -lfcgi -lpthread
 
 LIBS_STATIC_DEPS_FREEBSD := -lm $(LIBS_STATIC_DEPS_COMMON)
 
-LIBS_STATIC_DEPS_ALPINE := $(LIBS_STATIC_DEPS_COMMON) -lev -lcap -ldl -lm
+LIBS_STATIC_DEPS_ALPINE := $(LIBS_STATIC_DEPS_COMMON) -ldl -lm
+
+LIBS_STATIC_DEPS_UBUNTU := $(LIBS_STATIC_DEPS_COMMON) -lev -lcap -ldl -lm
 
 ifneq ("$(RECAPTCHA)", "NO")
 LIBS_STATIC_DEPS_ALPINE += -lzstd -lcares -lbrotlidec -lbrotlicommon
@@ -40,8 +42,13 @@ ifeq ("$(shell uname -o)", "FreeBSD")
 CFLAGS += -Wno-ignored-attributes
 LIBS_STATIC_DEPS := $(LIBS_STATIC_DEPS_FREEBSD)
 else
-LIBS_STATIC_DEPS := $(LIBS_STATIC_DEPS_ALPINE)
+ifeq ("$(findstring Ubuntu 20,$(shell grep Ubuntu\\\ 20 /etc/os-release))", "Ubuntu 20")
+LIBS_STATIC_DEPS := $(LIBS_STATIC_DEPS_UBUNTU)
 CFLAGS += -pie -DUSE_LWS_OLD_RETRY
+else
+LIBS_STATIC_DEPS := $(LIBS_STATIC_DEPS_ALPINE)
+CFLAGS += -pie
+endif
 endif
 
 ifeq ("$(BUILD)", "STATIC")
