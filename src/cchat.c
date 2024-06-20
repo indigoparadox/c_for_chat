@@ -7,8 +7,10 @@ typedef int (*cchat_route_cb_t)(
    struct CCHAT_OP_DATA* op, const_bstring arg,
    struct bstrList* q, struct bstrList* p, struct bstrList* c );
 
+#ifdef USE_RECAPTCHA
 extern bstring g_recaptcha_site_key;
 extern bstring g_recaptcha_secret_key;
+#endif /* USE_RECAPTCHA */
 
 bstring g_cchat_url = NULL;
 
@@ -179,6 +181,7 @@ static int cchat_profile_form(
       cchat_check_null( err_msg, RETVAL_ALLOC, page->text );
    }
 
+#ifdef USE_RECAPTCHA
    if( NULL != bdata( g_recaptcha_site_key ) ) {
       dbglog_debug( 1, "adding ReCAPTCHA field to form...\n" );
 
@@ -196,6 +199,7 @@ static int cchat_profile_form(
          goto cleanup;
       }
    }
+#endif /* USE_RECAPTCHA */
 
    dbglog_debug( 1, "adding submit button to form...\n" );
 
@@ -322,8 +326,10 @@ int cchat_route_user(
    bstring session = NULL;
    bstring csrf = NULL;
    bstring csrf_decode = NULL;
+#ifdef USE_RECAPTCHA
    bstring recaptcha = NULL;
    bstring recaptcha_decode = NULL;
+#endif /* USE_RECAPTCHA */
    bstring session_timeout = NULL;
    bstring session_timeout_decode = NULL;
    bstring flags_ws = NULL;
@@ -353,6 +359,7 @@ int cchat_route_user(
          !bstrcmp( csrf_decode, session ), err_msg, "Invalid CSRF token!" );
    }
 
+#ifdef USE_RECAPTCHA
    /* Grab recaptcha validation string if applicable. */
    bcgi_query_key( p, "g-recaptcha-response", &recaptcha );
    if( NULL != recaptcha ) {
@@ -362,6 +369,7 @@ int cchat_route_user(
       retval = webutil_check_recaptcha( &(op->req), recaptcha_decode );
       cchat_check_true( !retval, err_msg, "Invalid ReCAPTCHA response!" );
    }
+#endif /* USE_RECAPTCHA */
 
    if( NULL != op->auth_user ) {
       /* We're editing an existing user, so grab that user. */
@@ -419,8 +427,10 @@ cleanup:
    bcgi_cleanup_bstr( flags_ws_decode, likely );
    bcgi_cleanup_bstr( session_timeout, likely );
    bcgi_cleanup_bstr( session_timeout_decode, likely );
+#ifdef USE_RECAPTCHA
    bcgi_cleanup_bstr( recaptcha, likely );
    bcgi_cleanup_bstr( recaptcha_decode, likely );
+#endif /* USE_RECAPTCHA */
    bcgi_cleanup_bstr( csrf, likely );
    bcgi_cleanup_bstr( csrf_decode, likely );
    bcgi_cleanup_bstr( session, likely );
@@ -457,6 +467,7 @@ int cchat_route_login(
    );
    cchat_check_null( err_msg, RETVAL_ALLOC, page.text );
 
+#ifdef USE_RECAPTCHA
    if( NULL != bdata( g_recaptcha_site_key ) ) {
       /* Add recaptcha if key present. */
       retval = bformata( page.text,
@@ -475,6 +486,7 @@ int cchat_route_login(
          goto cleanup;
       }
    }
+#endif /* USE_RECAPTCHA */
 
    retval = bcatcstr( page.text,
       "<div class=\"login-field login-button\">"
@@ -538,8 +550,10 @@ int cchat_route_auth(
    bstring err_msg = NULL;
    bstring hash = NULL;
    bstring remote_host = NULL;
+#ifdef USE_RECAPTCHA
    bstring recaptcha = NULL;
    bstring recaptcha_decode = NULL;
+#endif /* USE_RECAPTCHA */
    bstring redirect_url = NULL;
    struct CHATDB_USER user_obj;
 
@@ -552,6 +566,7 @@ int cchat_route_auth(
       goto cleanup;
    }
 
+#ifdef USE_RECAPTCHA
    /* Grab recaptcha validation string if applicable. */
    bcgi_query_key( p, "g-recaptcha-response", &recaptcha );
    if( NULL != recaptcha ) {
@@ -569,6 +584,7 @@ int cchat_route_auth(
          goto cleanup;
       }
    }
+#endif /* USE_RECAPTCHA */
 
    /* There is POST data, so try to decode it. */
    cchat_decode_field( NULL, p, user );
@@ -624,8 +640,10 @@ cleanup:
    bcgi_cleanup_bstr( user_decode, likely );
    bcgi_cleanup_bstr( password, likely );
    bcgi_cleanup_bstr( password_decode, likely );
+#ifdef USE_RECAPTCHA
    bcgi_cleanup_bstr( recaptcha, likely );
    bcgi_cleanup_bstr( recaptcha_decode, likely );
+#endif /* USE_RECAPTCHA */
    bcgi_cleanup_bstr( err_msg, unlikely );
 
    chatdb_free_user( &user_obj );

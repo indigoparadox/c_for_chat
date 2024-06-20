@@ -9,8 +9,11 @@
 
 #include <curl/curl.h>
 
+#ifdef USE_RECAPTCHA
 extern bstring g_recaptcha_site_key;
 extern bstring g_recaptcha_secret_key;
+#endif /* USE_RECAPTCHA */
+
 extern bstring g_cchat_url;
 
 static int g_cgi_sock = -1;
@@ -283,8 +286,12 @@ void main_shutdown( int sig ) {
       FCGX_Free( &(g_op->req), g_cgi_sock );
    }
 
+#ifdef USE_RECAPTCHA
+
    dbglog_debug( 1, "shutting down curl...\n" );
    curl_global_cleanup();
+
+#endif /* USE_RECAPTCHA */
 
    dbglog_debug( 1, "shutting down logging...\n" );
    dbglog_shutdown();
@@ -407,9 +414,12 @@ int main( int argc, char* argv[] ) {
       bcgi_check_null( server_listen );
    }
 
+   dbglog_debug( 3, "checking environment...\n" );
+
    g_cchat_url = bfromcstr( getenv( "CCHAT_URL" ) );
 
-   dbglog_debug( 3, "checking environment...\n" );
+#ifdef USE_RECAPTCHA
+
    g_recaptcha_site_key = bfromcstr( getenv( "CCHAT_RECAPTCHA_SITE" ) );
    if( NULL == g_recaptcha_site_key ) {
       dbglog_debug( 1, "no ReCAPTCHA site key defined...\n" );
@@ -422,6 +432,8 @@ int main( int argc, char* argv[] ) {
    dbglog_debug( 3, "initializing curl...\n" );
 
    curl_global_init( CURL_GLOBAL_ALL );
+
+#endif /* USE_RECAPTCHA */
 
    dbglog_debug( 3, "initializing database...\n" );
 
@@ -472,8 +484,10 @@ cleanup:
 
    bcgi_cleanup_bstr( server_listen, likely );
    bcgi_cleanup_bstr( log_path, likely );
+#ifdef USE_RECAPTCHA
    bcgi_cleanup_bstr( g_recaptcha_site_key, likely );
    bcgi_cleanup_bstr( g_recaptcha_secret_key, likely );
+#endif /* USE_RECAPTCHA */
    bcgi_cleanup_bstr( g_cchat_url, likely );
    bcgi_cleanup_bstr( sock_iface, likely );
 

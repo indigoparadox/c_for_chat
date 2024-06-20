@@ -1,10 +1,14 @@
 
 #include "main.h"
 
-#include <curl/curl.h>
+#ifdef USE_RECAPTCHA
 
+#include <curl/curl.h>
+ 
 bstring g_recaptcha_site_key = NULL;
 bstring g_recaptcha_secret_key = NULL;
+
+#endif /* USE_RECAPTCHA */
 
 int webutil_format_time(
    bstring* out_p, bstring time_fmt, int timezone, time_t epoch
@@ -133,6 +137,8 @@ cleanup:
 
 }
 
+#ifdef USE_RECAPTCHA
+
 static int webutil_curl_writer(
    char *data, size_t size, size_t nmemb, bstring writer_data
 ) {
@@ -215,6 +221,8 @@ cleanup:
 
    return retval;
 }
+
+#endif /* USE_RECAPTCHA */
 
 int webutil_get_cookies( struct bstrList** out_p, struct CCHAT_OP_DATA* op ) {
    bstring cookies = NULL;
