@@ -320,9 +320,9 @@ static void* main_lws_handler( void* v_ctx ) {
 
 int main( int argc, char* argv[] ) {
    int retval = 0;
-   struct tagbstring chatdb_path = bsStatic( "chat.db" );
    int o = 0;
    bstring log_path = NULL;
+   bstring db_path = NULL;
    bstring server_listen = NULL;
    bstring sock_iface = NULL;
    struct lws_context_creation_info lws_info;
@@ -355,7 +355,7 @@ int main( int argc, char* argv[] ) {
 #endif /* USE_LWS_OLD_RETRY */
 
    /* Parse args. */
-   while( -1 != (o = getopt( argc, argv, "l:d:s:w:i:" )) ) {
+   while( -1 != (o = getopt( argc, argv, "l:b:d:s:w:i:" )) ) {
       switch( o ) {
       case 'i':
          sock_iface = bfromcstr( optarg );
@@ -372,6 +372,15 @@ int main( int argc, char* argv[] ) {
          }
          log_path = bfromcstr( optarg );
          bcgi_check_null( log_path );
+         break;
+
+      case 'b':
+         if( NULL != db_path ) {
+            retval = RETVAL_PARAMS;
+            goto cleanup;
+         }
+         db_path = bfromcstr( optarg );
+         bcgi_check_null( db_path );
          break;
 
       case 'd':
@@ -397,6 +406,11 @@ int main( int argc, char* argv[] ) {
    if( NULL == log_path ) {
       log_path = bfromcstr( "cchat.log" );
       bcgi_check_null( log_path );
+   }
+
+   if( NULL == db_path ) {
+      db_path = bfromcstr( "chat.db" );
+      bcgi_check_null( db_path );
    }
 
    retval = dbglog_init( bdata( log_path ) );
@@ -437,7 +451,7 @@ int main( int argc, char* argv[] ) {
 
    dbglog_debug( 3, "initializing database...\n" );
 
-   retval = chatdb_init( &chatdb_path, g_op );
+   retval = chatdb_init( db_path, g_op );
    if( retval ) {
       goto cleanup;
    }
@@ -484,6 +498,7 @@ cleanup:
 
    bcgi_cleanup_bstr( server_listen, likely );
    bcgi_cleanup_bstr( log_path, likely );
+   bcgi_cleanup_bstr( db_path, likely );
 #ifdef USE_RECAPTCHA
    bcgi_cleanup_bstr( g_recaptcha_site_key, likely );
    bcgi_cleanup_bstr( g_recaptcha_secret_key, likely );

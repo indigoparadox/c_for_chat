@@ -514,7 +514,7 @@ int chatdb_init( bstring path, struct CCHAT_OP_DATA* op ) {
    }
 
    /* Check to see if we're running an old schema. */
-   schema_ver.integer = 0;
+   schema_ver.integer = -1;
    retval = chatdb_get_option( "schema_version", &schema_ver, op, NULL );
    if( retval ) {
       dbglog_error( "error getting schema version!\n" );
@@ -522,6 +522,18 @@ int chatdb_init( bstring path, struct CCHAT_OP_DATA* op ) {
    }
    dbglog_debug( 9, "schema version: %d\n", schema_ver.integer );
    switch( schema_ver.integer ) {
+   case -1:
+      /* We must've just created this DB, so it's the latest version! */
+      schema_ver.integer = 4;
+      retval = chatdb_set_option(
+         "schema_version", &schema_ver, CHATDB_OPTION_FMT_INT, op, NULL );
+      if( retval ) {
+         dbglog_error( "error setting schema version!\n" );
+         goto cleanup;
+      }
+      dbglog_debug( 9, "updated schema version: %d\n", schema_ver.integer );
+      break;
+
    case 0:
       /* Bring up to version one. */
       _chatdb_alter_table( 1, op->db, &(op->db_mutex),
