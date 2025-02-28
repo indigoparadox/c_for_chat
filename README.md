@@ -15,6 +15,7 @@ C is for Chat is a web-based chat server designed to be simple and self-reliant.
  * Configuration panel.
  * Client timezone display.
  * Automatic message loading with scrolling.
+ * Use 64-bit time\_t equivalent.
 
 # Compiling
 
