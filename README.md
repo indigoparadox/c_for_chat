@@ -5,6 +5,7 @@ C is for Chat is a web-based chat server designed to be simple and self-reliant.
 
 # Roadmap
 
+ * Encryption with OMEMO or similar.
  * Sticker support.
  * Websockets for smooth chat history updates.
  * Automatic deletion of expired sessions on the server.
@@ -16,6 +17,7 @@ C is for Chat is a web-based chat server designed to be simple and self-reliant.
  * Client timezone display.
  * Automatic message loading with scrolling.
  * Use 64-bit time\_t equivalent.
+ * Isometric graphical lounge with avatar placement.
 
 # Compiling
 
